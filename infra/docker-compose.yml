@@ -1,0 +1,74 @@
+name: ice
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ice
+      POSTGRES_USER: ice
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ice_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ice -d ice"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: src/ICE.Api/Dockerfile
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=ice;Username=ice;Password=${POSTGRES_PASSWORD:-ice_dev_password}"
+      ConnectionStrings__Redis: "redis:6379"
+      RabbitMq__Host: "rabbitmq"
+      ASPNETCORE_URLS: "http://+:8080"
+    ports:
+      - "5000:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  document-processing-worker:
+    build:
+      context: ../workers/document-processing
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      ICE_API_BASE_URL: "http://api:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
