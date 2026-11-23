@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.git/
+.vs/
+.vscode/
+sources/
+workers/
+infra/
+*.html
+*.docx

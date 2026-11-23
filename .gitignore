@@ -16,3 +16,7 @@ venv/
 .vs/
 .vscode/
 *.swp
+
+# Worker source folder: only the samples are tracked
+sources/*
+!sources/samples/

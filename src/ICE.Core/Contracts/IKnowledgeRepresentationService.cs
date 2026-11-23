@@ -2,16 +2,14 @@ using ICE.Core.Models;
 
 namespace ICE.Core.Contracts;
 
+public sealed class HierarchyValidationException(string message) : Exception(message);
+
 /// <summary>
-/// Builds the hierarchical knowledge representation (document -> chapter/module ->
-/// section/class -> topic -> original passage) and extracts entities/relationships.
+/// Turns an extractor's output into the stored hierarchy: validates its structure and assigns
+/// store-wide node ids. Summaries and relationship extraction arrive in Phase 2.
 /// </summary>
 public interface IKnowledgeRepresentationService
 {
-    Task<IReadOnlyList<KnowledgeNode>> BuildHierarchyAsync(ResourceReference resource, IReadOnlyList<KnowledgeNode> rawNodes, CancellationToken ct = default);
-
-    /// <summary>Generates a summary for a node from its children (recomputed only for affected parents on change).</summary>
-    Task<string> SummarizeAsync(KnowledgeNode node, IReadOnlyList<KnowledgeNode> children, CancellationToken ct = default);
-
-    Task<IReadOnlyList<RelationshipEdge>> ExtractRelationshipsAsync(ResourceReference resource, IReadOnlyList<KnowledgeNode> nodes, CancellationToken ct = default);
+    /// <exception cref="HierarchyValidationException">The extracted nodes do not form a valid hierarchy.</exception>
+    IReadOnlyList<KnowledgeNode> BuildHierarchy(ResourceReference resource, IReadOnlyList<ExtractedNode> extracted);
 }

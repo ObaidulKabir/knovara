@@ -1,101 +1,462 @@
-"""Document Processing Worker (Phase 1 — Intelligent document ingestion).
+"""Document Processing Worker (Phase 1 - Intelligent document ingestion).
 
-Scaffold only. Consumes ingestion jobs from RabbitMQ, runs format-aware
-structural extraction with Docling (PDF/DOCX/PPTX/EPUB/HTML), and posts the
-resulting knowledge nodes back to the ICE.Api `/api/resources/ingest` pipeline
-so they are built into the hierarchy and indexed.
+Consumes ingestion jobs from RabbitMQ. For each job it:
+  1. fetches the source (a file under SOURCE_ROOT, or a public http(s) URL),
+  2. hashes it and asks the API whether that version is new (an unchanged
+     source stops here, before any parsing),
+  3. converts it with Docling (PDF, DOCX, PPTX, HTML, Markdown),
+  4. turns Docling's document into a hierarchy: document -> sections -> passages,
+     splitting oversized passages on sentence (or table-row) boundaries,
+  5. posts the hierarchy back to the API, or reports the failure.
 
-See system_architecture.md "Format-Aware Processing" and
-system_specifications.md "Phase 1 - Intelligent document ingestion".
+See system_architecture.md "Format-Aware Processing" and README.md.
 """
 
 from __future__ import annotations
 
+import functools
+import hashlib
+import ipaddress
+import itertools
 import json
 import logging
 import os
+import re
+import socket
+import tempfile
+import time
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 import pika
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.types.doc import DocItemLabel, PictureItem, SectionHeaderItem, TableItem, TitleItem
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("document-processing-worker")
 
 RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
 API_BASE_URL = os.environ.get("ICE_API_BASE_URL", "http://localhost:5000")
 QUEUE_NAME = os.environ.get("INGESTION_QUEUE", "ingestion.requests")
+SOURCE_ROOT = Path(os.environ.get("SOURCE_ROOT", "/sources"))
+MAX_SOURCE_BYTES = int(os.environ.get("MAX_SOURCE_BYTES", str(50 * 1024 * 1024)))
+MAX_CHUNK_CHARS = int(os.environ.get("MAX_CHUNK_CHARS", "3000"))
+ALLOW_PRIVATE_URLS = os.environ.get("ALLOW_PRIVATE_URLS", "false").lower() == "true"
+DO_OCR = os.environ.get("DOCLING_DO_OCR", "false").lower() == "true"
+ARTIFACTS_PATH = os.environ.get("DOCLING_ARTIFACTS_PATH")
+HEARTBEAT_SECONDS = int(os.environ.get("RABBITMQ_HEARTBEAT_SECONDS", "600"))
+MAX_REDIRECTS = 5
+MAX_TITLE_CHARS = 1000
+
+# Part of every version hash: the stored hierarchy depends on the extraction logic as well as the
+# source bytes, so bumping this re-processes every source once on its next ingest.
+EXTRACTOR_VERSION = "docling-hierarchy-2"
+NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+\S")
+
+SUPPORTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".html", ".htm", ".md", ".markdown"}
+SUFFIX_BY_CONTENT_TYPE = {
+    "application/pdf": ".pdf",
+    "text/html": ".html",
+    "application/xhtml+xml": ".html",
+    "text/markdown": ".md",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+}
+SKIPPED_LABELS = {DocItemLabel.PAGE_HEADER, DocItemLabel.PAGE_FOOTER, DocItemLabel.DOCUMENT_INDEX}
+LEVEL_BY_LABEL = {
+    DocItemLabel.PARAGRAPH: "paragraph",
+    DocItemLabel.TEXT: "paragraph",
+    DocItemLabel.LIST_ITEM: "list_item",
+    DocItemLabel.CODE: "code",
+    DocItemLabel.FORMULA: "formula",
+    DocItemLabel.CAPTION: "caption",
+    DocItemLabel.FOOTNOTE: "footnote",
+}
 
 
-@dataclass
+class SourceError(Exception):
+    """The source can't be fetched or isn't a supported document. Reported to the API, not retried."""
+
+
+class ApiUnavailable(Exception):
+    """The API couldn't be reached or failed on its side. The job is requeued."""
+
+
+@dataclass(frozen=True)
 class IngestionJob:
     resource_id: str
+    tenant_id: str
     uri: str
     source_type: str
-    tenant_id: str
 
 
-def extract_structure(job: IngestionJob) -> list[dict]:
-    """Runs Docling structural extraction for the job's source.
+@dataclass(frozen=True)
+class FetchedSource:
+    data: bytes
+    suffix: str
+    name: str
 
-    Placeholder: returns a single document-level node. Replace with a real
-    Docling DocumentConverter call that walks the resulting structure
-    (chapters/sections/paragraphs/tables) into KnowledgeNode-shaped dicts.
+
+# --------------------------------------------------------------------------- fetching
+
+def fetch(uri: str) -> FetchedSource:
+    if urlparse(uri).scheme in ("http", "https"):
+        return fetch_url(uri)
+    return read_local(uri)
+
+
+def read_local(relative: str) -> FetchedSource:
+    root = SOURCE_ROOT.resolve()
+    candidate = (root / PurePosixPath(relative.replace("\\", "/"))).resolve()
+    if root not in candidate.parents:
+        raise SourceError(f"'{relative}' is outside the source folder")
+    if not candidate.is_file():
+        raise SourceError(f"'{relative}' was not found in the source folder")
+    if candidate.stat().st_size > MAX_SOURCE_BYTES:
+        raise SourceError(f"'{relative}' is larger than {MAX_SOURCE_BYTES} bytes")
+
+    suffix = candidate.suffix.lower()
+    if suffix not in SUPPORTED_SUFFIXES:
+        raise SourceError(f"'{suffix or 'no extension'}' is not a supported format ({', '.join(sorted(SUPPORTED_SUFFIXES))})")
+    return FetchedSource(candidate.read_bytes(), suffix, candidate.name)
+
+
+def fetch_url(url: str) -> FetchedSource:
+    for _ in range(MAX_REDIRECTS + 1):
+        ensure_public_host(url)
+        with httpx.stream("GET", url, follow_redirects=False, timeout=60) as response:
+            if response.is_redirect:
+                url = urljoin(url, response.headers["location"])
+                continue
+            if response.status_code >= 400:
+                raise SourceError(f"GET {url} returned {response.status_code}")
+
+            body = bytearray()
+            for chunk in response.iter_bytes():
+                body.extend(chunk)
+                if len(body) > MAX_SOURCE_BYTES:
+                    raise SourceError(f"{url} is larger than {MAX_SOURCE_BYTES} bytes")
+
+            suffix = suffix_for(url, response.headers.get("content-type", ""))
+            name = unquote(PurePosixPath(urlparse(url).path).name) or urlparse(url).hostname or "document"
+            return FetchedSource(bytes(body), suffix, name)
+    raise SourceError(f"more than {MAX_REDIRECTS} redirects")
+
+
+def ensure_public_host(url: str) -> None:
+    """Refuses URLs that resolve to private, loopback or link-local addresses (internal services, cloud metadata)."""
+    if ALLOW_PRIVATE_URLS:
+        return
+    host = urlparse(url).hostname
+    if not host:
+        raise SourceError(f"'{url}' has no host")
+    try:
+        addresses = {info[4][0] for info in socket.getaddrinfo(host, None)}
+    except socket.gaierror as exc:
+        raise SourceError(f"cannot resolve {host}: {exc}") from exc
+    for address in addresses:
+        if not ipaddress.ip_address(address).is_global:
+            raise SourceError(f"refusing {host}: it resolves to non-public address {address}")
+
+
+def suffix_for(url: str, content_type: str) -> str:
+    path_suffix = PurePosixPath(urlparse(url).path).suffix.lower()
+    if path_suffix in SUPPORTED_SUFFIXES:
+        return path_suffix
+    media_type = content_type.split(";")[0].strip().lower()
+    if media_type in SUFFIX_BY_CONTENT_TYPE:
+        return SUFFIX_BY_CONTENT_TYPE[media_type]
+    raise SourceError(f"unsupported content type '{media_type or 'unknown'}' at {url}")
+
+
+# --------------------------------------------------------------------------- extraction
+
+def build_converter() -> DocumentConverter:
+    pdf_options = PdfPipelineOptions(artifacts_path=ARTIFACTS_PATH) if ARTIFACTS_PATH else PdfPipelineOptions()
+    pdf_options.do_ocr = DO_OCR
+    pdf_options.do_table_structure = True
+    return DocumentConverter(
+        allowed_formats=[InputFormat.PDF, InputFormat.DOCX, InputFormat.PPTX, InputFormat.HTML, InputFormat.MD],
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)},
+    )
+
+
+def extract(converter: DocumentConverter, source: FetchedSource) -> list[dict]:
+    with tempfile.TemporaryDirectory() as work_dir:
+        path = Path(work_dir) / f"source{source.suffix}"
+        path.write_bytes(source.data)
+        try:
+            document = converter.convert(path).document
+        except Exception as exc:  # noqa: BLE001 - any conversion failure is a property of the source
+            raise SourceError(f"Docling could not convert {source.name}: {exc}") from exc
+    return to_nodes(document, source.name)
+
+
+def to_nodes(document, source_name: str) -> list[dict]:
+    """Document -> section (one per heading, nested by heading level) -> passages, in reading order.
+
+    Each passage's title is its heading path, so a search on a section's topic finds its passages.
     """
-    logger.info("Extracting structure for %s (%s)", job.uri, job.source_type)
-    return [
-        {
-            "nodeId": job.resource_id,
-            "resourceId": job.resource_id,
-            "parentNodeId": None,
-            "level": "document",
-            "title": job.uri,
-            "summary": None,
-            "originalContent": None,
-            "metadata": {"sourceType": job.source_type},
-        }
-    ]
+    nodes: list[dict] = []
+    ids = (f"n{i}" for i in itertools.count())
+
+    def add(parent: str | None, level: str, title: str, content: str | None, metadata: dict) -> str:
+        local_id = next(ids)
+        nodes.append({
+            "localId": local_id,
+            "parentLocalId": parent,
+            "level": level,
+            "title": title[:MAX_TITLE_CHARS],
+            "content": content,
+            "metadata": metadata,
+        })
+        return local_id
+
+    root = add(None, "document", source_name, None, {"source": source_name})
+    sections: list[tuple[int, str, str]] = []  # (heading level, local id, heading text)
+    levels, inferred = heading_levels(document)
+    caption_refs = {ref.cref for owner in [*document.tables, *document.pictures] for ref in owner.captions}
+    titled = content_seen = False
+
+    def heading_path() -> str:
+        return " > ".join([nodes[0]["title"]] + [text for _, _, text in sections])
+
+    def parent() -> str:
+        return sections[-1][1] if sections else root
+
+    for item, _depth in document.iterate_items():
+        label = getattr(item, "label", None)
+        if label in SKIPPED_LABELS or getattr(item, "self_ref", None) in caption_refs:
+            continue
+
+        metadata = {"label": str(getattr(label, "value", label))}
+        page = item.prov[0].page_no if getattr(item, "prov", None) else None
+        if page:
+            metadata["page"] = str(page)
+
+        if isinstance(item, TitleItem):
+            if item.text.strip() and not sections:
+                nodes[0]["title"] = item.text.strip()[:MAX_TITLE_CHARS]
+                titled = True
+            continue
+
+        if isinstance(item, SectionHeaderItem):
+            text = item.text.strip()
+            if not text:
+                continue
+            # PDFs rarely mark a title; a heading that opens page 1 before any text is the title.
+            if inferred and not titled and not content_seen and not sections and page == 1:
+                nodes[0]["title"] = text[:MAX_TITLE_CHARS]
+                titled = True
+                continue
+            heading_level = levels.get(item.self_ref, item.level or 1)
+            while sections and sections[-1][0] >= heading_level:
+                sections.pop()
+            metadata["headingLevel"] = str(heading_level)
+            section_id = add(parent(), "section", f"{heading_path()} > {text}", None, metadata)
+            sections.append((heading_level, section_id, text))
+            continue
+
+        if isinstance(item, TableItem):
+            level, content, pieces = "table", item.export_to_markdown(doc=document), split_table
+        elif isinstance(item, PictureItem):
+            level, content, pieces = "figure", item.caption_text(doc=document), split_text
+        else:
+            level = LEVEL_BY_LABEL.get(label, str(getattr(label, "value", label)))
+            content, pieces = getattr(item, "text", ""), split_text
+
+        content = (content or "").strip()
+        if not content:
+            continue
+        content_seen = True
+
+        chunks = pieces(content, MAX_CHUNK_CHARS)
+        for index, chunk in enumerate(chunks, start=1):
+            chunk_metadata = dict(metadata)
+            if len(chunks) > 1:
+                chunk_metadata["chunk"] = f"{index}/{len(chunks)}"
+            add(parent(), level, heading_path(), chunk, chunk_metadata)
+
+    return nodes
 
 
-def handle_message(channel, method, properties, body: bytes) -> None:
+def heading_levels(document) -> tuple[dict[str, int], bool]:
+    """Returns each heading's level, and whether the levels had to be inferred.
+
+    Docling's PDF pipeline reports every heading at level 1. When all headings share one level,
+    depth comes from section numbering ("3.1 PDF backends" -> 2), and an unnumbered heading sits
+    one level below the most recent numbered one ("Layout Analysis Model" under "3.2 AI models").
+    """
+    headers = [item for item, _ in document.iterate_items() if isinstance(item, SectionHeaderItem)]
+    if len({header.level for header in headers}) > 1:
+        return {header.self_ref: header.level for header in headers}, False
+
+    levels, last_numbered = {}, 0
+    for header in headers:
+        match = NUMBERED_HEADING.match(header.text.strip())
+        if match:
+            last_numbered = match.group(1).count(".") + 1
+            levels[header.self_ref] = last_numbered
+        else:
+            levels[header.self_ref] = last_numbered + 1 if last_numbered else 1
+    return levels, True
+
+
+def split_text(text: str, limit: int) -> list[str]:
+    """Splits on sentence boundaries; a single sentence longer than the limit is cut at the limit."""
+    if len(text) <= limit:
+        return [text]
+    chunks, current = [], ""
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        while len(sentence) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(sentence[:limit])
+            sentence = sentence[limit:]
+        if current and len(current) + 1 + len(sentence) > limit:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}".strip()
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def split_table(markdown: str, limit: int) -> list[str]:
+    """Splits a Markdown table between rows, repeating the header row and separator in every piece."""
+    if len(markdown) <= limit:
+        return [markdown]
+    lines = markdown.splitlines()
+    header, rows = lines[:2], lines[2:]
+    chunks, current = [], list(header)
+    for row in rows:
+        if len(current) > len(header) and len("\n".join(current + [row])) > limit:
+            chunks.append("\n".join(current))
+            current = list(header)
+        current.append(row)
+    chunks.append("\n".join(current))
+    return [chunk if len(chunk) <= limit else chunk[:limit] for chunk in chunks]
+
+
+# --------------------------------------------------------------------------- API
+
+class Api:
+    def __init__(self, tenant_id: str):
+        self._client = httpx.Client(base_url=API_BASE_URL, timeout=120, headers={"X-Tenant-Id": tenant_id})
+
+    def __enter__(self) -> "Api":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self._client.close()
+
+    def _post(self, path: str, body: dict) -> httpx.Response:
+        try:
+            response = self._client.post(path, json=body)
+        except httpx.TransportError as exc:
+            raise ApiUnavailable(f"POST {path}: {exc}") from exc
+        if response.status_code >= 500:
+            raise ApiUnavailable(f"POST {path} returned {response.status_code}")
+        response.raise_for_status()
+        return response
+
+    def version_changed(self, resource_id: str, content_hash: str) -> bool:
+        return self._post(f"/api/resources/{resource_id}/version", {"contentHash": content_hash}).json()["changed"]
+
+    def submit(self, resource_id: str, content_hash: str, nodes: list[dict]) -> None:
+        self._post(f"/api/resources/{resource_id}/nodes", {"contentHash": content_hash, "nodes": nodes})
+
+    def fail(self, resource_id: str, error: str) -> None:
+        self._post(f"/api/resources/{resource_id}/failure", {"error": error[:2000]})
+
+
+# --------------------------------------------------------------------------- consuming
+
+def process(converter: DocumentConverter, job: IngestionJob) -> None:
+    with Api(job.tenant_id) as api:
+        try:
+            source = fetch(job.uri)
+            content_hash = "sha256:" + hashlib.sha256(EXTRACTOR_VERSION.encode() + b"\0" + source.data).hexdigest()
+            if not api.version_changed(job.resource_id, content_hash):
+                logger.info("%s unchanged (%s), skipped", job.uri, content_hash[:19])
+                return
+
+            started = time.monotonic()
+            nodes = extract(converter, source)
+            api.submit(job.resource_id, content_hash, nodes)
+            logger.info("%s -> %d nodes in %.1fs", job.uri, len(nodes), time.monotonic() - started)
+        except SourceError as exc:
+            logger.warning("%s failed: %s", job.uri, exc)
+            api.fail(job.resource_id, str(exc))
+        except httpx.HTTPStatusError as exc:
+            message = f"API rejected {exc.request.url.path}: {exc.response.status_code} {exc.response.text[:500]}"
+            logger.warning("%s failed: %s", job.uri, message)
+            api.fail(job.resource_id, message)
+
+
+def handle_message(converter: DocumentConverter, channel, method, _properties, body: bytes) -> None:
     try:
         payload = json.loads(body)
         job = IngestionJob(
             resource_id=payload["resourceId"],
+            tenant_id=payload["tenantId"],
             uri=payload["uri"],
             source_type=payload["sourceType"],
-            tenant_id=payload["tenantId"],
         )
-        nodes = extract_structure(job)
-
-        with httpx.Client(base_url=API_BASE_URL, timeout=30.0) as client:
-            response = client.post(
-                f"/api/resources/{job.resource_id}/nodes",
-                headers={"X-Tenant-Id": job.tenant_id},
-                json=nodes,
-            )
-            response.raise_for_status()
-
+    except (ValueError, KeyError) as exc:
+        logger.error("discarding malformed job %r: %s", body[:200], exc)
         channel.basic_ack(delivery_tag=method.delivery_tag)
-    except Exception:  # noqa: BLE001 - worker must not crash the consume loop
-        logger.exception("Failed to process ingestion job")
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        return
+
+    try:
+        process(converter, job)
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+    except ApiUnavailable as exc:
+        logger.warning("API unavailable, requeueing %s: %s", job.uri, exc)
+        time.sleep(5)
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+    except Exception:  # noqa: BLE001 - one bad job must not stop the worker
+        logger.exception("unexpected failure on %s; dropping the job", job.uri)
+        channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def main() -> None:
-    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
-    channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME, durable=True)
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=handle_message)
+    logger.info("loading Docling (OCR %s)", "on" if DO_OCR else "off")
+    converter = build_converter()
 
-    logger.info("Listening on queue '%s'", QUEUE_NAME)
-    try:
-        channel.start_consuming()
-    except KeyboardInterrupt:
-        channel.stop_consuming()
-    finally:
-        connection.close()
+    parameters = pika.URLParameters(RABBITMQ_URL)
+    parameters.heartbeat = HEARTBEAT_SECONDS
+    parameters.blocked_connection_timeout = 300
+
+    while True:
+        try:
+            connection = pika.BlockingConnection(parameters)
+        except pika.exceptions.AMQPConnectionError:
+            logger.warning("RabbitMQ unavailable, retrying in 5s")
+            time.sleep(5)
+            continue
+
+        channel = connection.channel()
+        channel.queue_declare(queue=QUEUE_NAME, durable=True)
+        channel.basic_qos(prefetch_count=1)
+        channel.basic_consume(queue=QUEUE_NAME, on_message_callback=functools.partial(handle_message, converter))
+        logger.info("listening on '%s', API at %s, sources at %s", QUEUE_NAME, API_BASE_URL, SOURCE_ROOT)
+        try:
+            channel.start_consuming()
+        except pika.exceptions.ConnectionClosedByBroker:
+            logger.warning("connection closed by broker, reconnecting")
+        except pika.exceptions.AMQPConnectionError:
+            logger.warning("connection lost, reconnecting")
+        except KeyboardInterrupt:
+            channel.stop_consuming()
+            connection.close()
+            return
 
 
 if __name__ == "__main__":

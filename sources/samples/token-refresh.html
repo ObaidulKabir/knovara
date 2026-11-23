@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Authentication Handbook</title></head>
+<body>
+  <h1>Authentication Handbook</h1>
+  <h2>Access Tokens</h2>
+  <p>Access tokens are short-lived JSON Web Tokens issued by the identity service. Each token expires fifteen minutes after it is issued.</p>
+  <h2>Token Refresh Mechanism</h2>
+  <p>The system issues a new access token when the existing token expires. The client presents its refresh token to the token endpoint, which validates it, rotates it, and returns a fresh access token together with a new refresh token.</p>
+  <p>A refresh token can be used exactly once. Presenting an already-used refresh token revokes the whole token family, which protects against stolen refresh tokens being replayed. Refresh tokens themselves expire after thirty days of inactivity, after which the user must sign in again. Clients should refresh proactively about one minute before the access token expires, so requests in flight are not rejected. If the token endpoint is unreachable, clients should retry with backoff rather than discarding the session, because the refresh token stays valid until it is used or expires. Servers validate the signature, issuer, audience and expiry of every access token on every request; no token is trusted because it was valid earlier. This paragraph is deliberately long so that the worker has to split it into more than one passage when the chunk limit is set low, which exercises the sentence-boundary splitter rather than only the structural boundaries that headings provide.</p>
+</body>
+</html>

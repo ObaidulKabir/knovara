@@ -18,20 +18,20 @@ public sealed partial class RetrievalController : ControllerBase
     private readonly IIntelligentRetrievalService _retrieval;
     private readonly IContextOptimizationService _optimization;
     private readonly IContextMemoryService _memory;
-    private readonly IResourceIngestionService _resources;
+    private readonly IKnowledgeStore _store;
     private readonly IEvaluationService _evaluation;
 
     public RetrievalController(
         IIntelligentRetrievalService retrieval,
         IContextOptimizationService optimization,
         IContextMemoryService memory,
-        IResourceIngestionService resources,
+        IKnowledgeStore store,
         IEvaluationService evaluation)
     {
         _retrieval = retrieval;
         _optimization = optimization;
         _memory = memory;
-        _resources = resources;
+        _store = store;
         _evaluation = evaluation;
     }
 
@@ -92,18 +92,19 @@ public sealed partial class RetrievalController : ControllerBase
     private async Task<bool> AllCurrentAsync(IReadOnlyList<EvidenceItem> evidence, string tenantId, CancellationToken ct)
         => (await KeepCurrentAsync(evidence, tenantId, ct)).Count == evidence.Count;
 
+    /// <summary>
+    /// Keeps only evidence whose node still exists at the cited version, and replaces its content with
+    /// the original passage from the knowledge store.
+    /// </summary>
     private async Task<IReadOnlyList<EvidenceItem>> KeepCurrentAsync(IReadOnlyList<EvidenceItem> evidence, string tenantId, CancellationToken ct)
     {
-        var current = new List<EvidenceItem>(evidence.Count);
-        foreach (var item in evidence)
-        {
-            var resource = await _resources.GetResourceAsync(item.ResourceId, ct);
-            if (resource is not null && resource.TenantId == tenantId && resource.SourceVersion == item.SourceVersion)
-            {
-                current.Add(item);
-            }
-        }
-        return current;
+        var passages = (await _store.GetCurrentPassagesAsync(tenantId, evidence.Select(e => e.NodeId).ToList(), ct))
+            .ToDictionary(p => p.NodeId);
+
+        return evidence
+            .Where(e => passages.TryGetValue(e.NodeId, out var p) && p.SourceVersion == e.SourceVersion)
+            .Select(e => e with { Content = passages[e.NodeId].Content })
+            .ToList();
     }
 
     private static string Fingerprint(string question)

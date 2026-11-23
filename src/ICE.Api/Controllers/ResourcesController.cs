@@ -1,113 +1,153 @@
+using System.Text.RegularExpressions;
 using ICE.Core.Contracts;
 using ICE.Core.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ICE.Api.Controllers;
 
-public record IngestRequest(string Uri, SourceType Type, string? ContentHash);
+public record IngestRequest(string Uri, SourceType Type);
+public record VersionCheckRequest(string ContentHash);
+public record VersionCheckResponse(bool Changed);
+public record SubmitExtractionRequest(string ContentHash, IReadOnlyList<ExtractedNode> Nodes);
+public record ExtractionFailureRequest(string Error);
 
+/// <summary>
+/// Ingestion is asynchronous: <c>ingest</c> registers the resource and queues it; the Docling worker
+/// then calls <c>version</c>, and <c>nodes</c> or <c>failure</c>, on the same resource.
+/// </summary>
 [ApiController]
 [Route("api/resources")]
-public sealed class ResourcesController : ControllerBase
+public sealed partial class ResourcesController(
+    IKnowledgeStore store,
+    IIngestionQueue queue,
+    IKnowledgeRepresentationService knowledge,
+    IContextMemoryService memory) : ControllerBase
 {
     private const string IndexVersion = "idx-v1";
     private const string ModelVersion = "model-v1";
-    private const string InitialVersion = "v1";
+    private const int MaxUriLength = 2_048;
+    private const int MaxErrorLength = 2_000;
 
-    private readonly IResourceIngestionService _ingestion;
-    private readonly IKnowledgeRepresentationService _knowledge;
-    private readonly IIndexManagementService _index;
-    private readonly IContextMemoryService _memory;
-
-    public ResourcesController(
-        IResourceIngestionService ingestion,
-        IKnowledgeRepresentationService knowledge,
-        IIndexManagementService index,
-        IContextMemoryService memory)
-    {
-        _ingestion = ingestion;
-        _knowledge = knowledge;
-        _index = index;
-        _memory = memory;
-    }
-
-    /// <summary>
-    /// Registers a source and, only if this is a new version, runs ingestion -> hierarchy -> indexing.
-    /// An unchanged source stops at the version check.
-    /// </summary>
     [HttpPost("ingest")]
     public async Task<ActionResult<ResourceReference>> Ingest(
         [FromHeader(Name = TenantHeader.Name)] string tenantId,
         [FromBody] IngestRequest request,
         CancellationToken ct)
     {
-        var registration = await _ingestion.RegisterResourceAsync(
-            request.Uri, request.Type, tenantId, request.ContentHash ?? InitialVersion, ct);
-
-        if (!registration.IsNewVersion)
+        if (request.Type == SourceType.Code)
         {
-            return Ok(registration.Resource);
+            return Problem(statusCode: 400, title: "Code ingestion arrives in Phase 4.",
+                detail: "Phase 1 accepts Document and Website sources.");
         }
 
-        var resource = registration.Resource;
-        await SupersedeAsync(registration, ct);
+        if (!IsAcceptableUri(request.Uri))
+        {
+            return Problem(statusCode: 400, title: "Unsupported URI.",
+                detail: "Use an http(s) URL, or a relative path inside the worker's source folder (no '..', no absolute paths).");
+        }
 
-        var rawNodes = await _ingestion.IngestAsync(resource, ct);
-        await BuildAndIndexAsync(resource, rawNodes, ct);
+        var resource = await store.RegisterResourceAsync(tenantId, request.Uri, request.Type, ct);
+        await queue.EnqueueAsync(new IngestionJob(resource.ResourceId, tenantId, resource.Uri, resource.Type), ct);
 
-        return Ok(resource);
+        return AcceptedAtAction(nameof(Get), new { resourceId = resource.ResourceId }, resource);
     }
 
-    /// <summary>
-    /// Accepts raw structural nodes extracted out-of-process (e.g. by the Python Docling worker in
-    /// workers/document-processing) for an already-registered resource, and runs hierarchy -> indexing -> document cache.
-    /// </summary>
-    [HttpPost("{resourceId}/nodes")]
-    public async Task<ActionResult<IReadOnlyList<KnowledgeNode>>> SubmitExtractedNodes(
+    [HttpGet("{resourceId}")]
+    public async Task<ActionResult<ResourceReference>> Get(
         [FromHeader(Name = TenantHeader.Name)] string tenantId,
         string resourceId,
-        [FromBody] IReadOnlyList<KnowledgeNode> rawNodes,
         CancellationToken ct)
     {
-        var resource = await _ingestion.GetResourceAsync(resourceId, ct);
-        if (resource is null || resource.TenantId != tenantId)
-        {
-            return NotFound();
-        }
-
-        if (rawNodes.Any(n => n.ResourceId != resource.ResourceId))
-        {
-            return BadRequest("Every node must belong to the resource in the route.");
-        }
-
-        var nodes = await BuildAndIndexAsync(resource, rawNodes, ct);
-        return Ok(nodes);
+        var resource = await store.GetResourceAsync(tenantId, resourceId, ct);
+        return resource is null ? NotFound() : Ok(resource);
     }
 
-    private async Task SupersedeAsync(ResourceRegistration registration, CancellationToken ct)
+    /// <summary>Called by the worker after hashing the fetched source, before parsing it.</summary>
+    [HttpPost("{resourceId}/version")]
+    public async Task<ActionResult<VersionCheckResponse>> CheckVersion(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string resourceId,
+        [FromBody] VersionCheckRequest request,
+        CancellationToken ct)
     {
-        if (registration.SupersededVersion is null) return;
+        if (!IsContentHash(request.ContentHash)) return Problem(statusCode: 400, title: "contentHash must be 'sha256:' followed by 64 lowercase hex digits.");
 
-        var resource = registration.Resource;
-        await _index.InvalidateAsync(resource, ct);
-        await _memory.PurgeSupersededAsync(resource.TenantId, resource.ResourceId, registration.SupersededVersion, ct);
+        return await store.CheckVersionAsync(tenantId, resourceId, request.ContentHash, ct) switch
+        {
+            VersionCheck.NotFound => NotFound(),
+            VersionCheck.Unchanged => Ok(new VersionCheckResponse(Changed: false)),
+            _ => Ok(new VersionCheckResponse(Changed: true))
+        };
     }
 
-    private async Task<IReadOnlyList<KnowledgeNode>> BuildAndIndexAsync(ResourceReference resource, IReadOnlyList<KnowledgeNode> rawNodes, CancellationToken ct)
+    /// <summary>Called by the worker with the extracted hierarchy of a new version.</summary>
+    [HttpPost("{resourceId}/nodes")]
+    public async Task<ActionResult<ResourceReference>> SubmitExtraction(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string resourceId,
+        [FromBody] SubmitExtractionRequest request,
+        CancellationToken ct)
     {
-        var nodes = await _knowledge.BuildHierarchyAsync(resource, rawNodes, ct);
+        if (!IsContentHash(request.ContentHash)) return Problem(statusCode: 400, title: "contentHash must be 'sha256:' followed by 64 lowercase hex digits.");
 
-        foreach (var node in nodes)
+        var resource = await store.GetResourceAsync(tenantId, resourceId, ct);
+        if (resource is null) return NotFound();
+
+        IReadOnlyList<KnowledgeNode> nodes;
+        try
         {
-            await _index.IndexNodeAsync(resource, node, IndexingLevel.Basic, ct);
+            nodes = knowledge.BuildHierarchy(resource, request.Nodes);
+        }
+        catch (HierarchyValidationException ex)
+        {
+            await store.MarkFailedAsync(tenantId, resourceId, $"Invalid extraction: {ex.Message}", ct);
+            return Problem(statusCode: 400, title: "Invalid extraction.", detail: ex.Message);
         }
 
-        var edges = await _knowledge.ExtractRelationshipsAsync(resource, nodes, ct);
-        await _index.IndexRelationshipsAsync(resource, edges, ct);
+        var commit = await store.CommitVersionAsync(tenantId, resourceId, request.ContentHash, nodes, ct);
+        if (commit is null) return NotFound();
 
-        var cacheKey = new CacheKey(resource.ResourceId, resource.SourceVersion, IndexVersion, ModelVersion, resource.TenantId);
-        await _memory.SetCachedDocumentKnowledgeAsync(cacheKey, nodes, ct);
+        if (commit.Applied)
+        {
+            if (commit.SupersededVersion is not null)
+            {
+                await memory.PurgeSupersededAsync(tenantId, resourceId, commit.SupersededVersion, ct);
+            }
 
-        return nodes;
+            var cacheKey = new CacheKey(resourceId, request.ContentHash, IndexVersion, ModelVersion, tenantId);
+            await memory.SetCachedDocumentKnowledgeAsync(cacheKey, nodes, ct);
+        }
+
+        return Ok(commit.Resource);
     }
+
+    [HttpPost("{resourceId}/failure")]
+    public async Task<IActionResult> ReportFailure(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string resourceId,
+        [FromBody] ExtractionFailureRequest request,
+        CancellationToken ct)
+    {
+        var error = request.Error.Length > MaxErrorLength ? request.Error[..MaxErrorLength] : request.Error;
+        return await store.MarkFailedAsync(tenantId, resourceId, error, ct) ? NoContent() : NotFound();
+    }
+
+    private static bool IsAcceptableUri(string uri)
+    {
+        if (string.IsNullOrWhiteSpace(uri) || uri.Length > MaxUriLength) return false;
+
+        if (Uri.TryCreate(uri, UriKind.Absolute, out var absolute) && absolute.Scheme is "http" or "https")
+        {
+            return true;
+        }
+
+        var segments = uri.Replace('\\', '/').Split('/');
+        return !uri.StartsWith('/') && !uri.StartsWith('\\') && !uri.Contains(':')
+               && segments.All(s => s.Length > 0 && s != "." && s != "..");
+    }
+
+    private static bool IsContentHash(string? value) => value is not null && ContentHashPattern().IsMatch(value);
+
+    [GeneratedRegex("^sha256:[0-9a-f]{64}$")]
+    private static partial Regex ContentHashPattern();
 }
