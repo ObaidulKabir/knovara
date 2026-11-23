@@ -1,0 +1,398 @@
+<title>ICRO Data Flow Diagrams</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* layout concept: Level 0 is one process ringed by its three external entities;
+   Level 1 lays out six processes in three rows (write path / read path /
+   support path), each row flanked by the external entity it talks to, so every
+   flow is short and local except the two that deliberately cross rows */
+:root{
+  --bg:#f6f5f1; --surface:#ffffff; --surface-2:#ececE6;
+  --border:#cfcbc1; --fg:#1c1a16; --muted:#6b6658;
+  --accent:#b5541f; --accent-soft:#f1e3d6;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15130f; --surface:#1d1a15; --surface-2:#262219;
+    --border:#443e30; --fg:#efeae0; --muted:#a39a87;
+    --accent:#e08a4f; --accent-soft:#3a2a1c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15130f; --surface:#1d1a15; --surface-2:#262219;
+  --border:#443e30; --fg:#efeae0; --muted:#a39a87;
+  --accent:#e08a4f; --accent-soft:#3a2a1c;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Inter",system-ui,sans-serif;}
+.wrap{max-width:1180px;margin:0 auto;padding:40px 0 64px;}
+h1{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;
+  font-size:clamp(26px,4vw,36px);letter-spacing:-0.01em;margin:0 0 6px;}
+.kicker{font-family:"Space Grotesk",system-ui,sans-serif;font-size:13px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+.lede{max-width:680px;color:var(--muted);font-size:15.5px;line-height:1.55;margin:0 0 30px;}
+h2{font-family:"Space Grotesk",system-ui,sans-serif;font-size:19px;font-weight:600;margin:48px 0 4px;}
+.sub{color:var(--muted);font-size:14px;margin:0 0 18px;max-width:700px;line-height:1.5;}
+figure{margin:0;}
+.diagram-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface);padding:12px 4px;}
+.diagram-scroll svg{display:block;margin:0 auto;}
+figcaption{color:var(--muted);font-size:13.5px;line-height:1.5;margin-top:10px;max-width:780px;}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin:20px 0 0;font-size:12.5px;color:var(--muted);
+  border-top:1px solid var(--border);padding-top:16px;}
+.legend span{display:inline-flex;align-items:center;gap:8px;}
+.lshape{width:30px;height:18px;flex:none;}
+.note{margin-top:40px;padding:16px 18px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface-2);font-size:13.5px;color:var(--muted);line-height:1.6;}
+.note b{color:var(--fg);font-weight:600;}
+svg text{font-family:"Inter",system-ui,sans-serif;fill:currentColor;}
+svg .title{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;}
+svg .num{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;fill:var(--accent);}
+svg .flow{font-size:11.5px;}
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+
+<div class="wrap">
+  <p class="kicker">ICE / ICRO</p>
+  <h1>Data Flow Diagrams</h1>
+  <p class="lede">Gane–Sarson notation: rounded boxes are processes, sharp-cornered
+    boxes are external entities, open two-line shapes are data stores, and every
+    arrow carries the data actually moving, not just a "related to" line.</p>
+
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+      </marker>
+      <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <h2>Level 0 — Context Diagram</h2>
+  <p class="sub">The whole system as a single process, bounded by the four parties
+    it exchanges data with. Model providers are outside the boundary: the system sends
+    them text and gets back summaries, vectors and relevance scores.</p>
+
+  <figure>
+    <div class="diagram-scroll">
+<svg viewBox="0 0 940 560" width="940" height="560" role="img"
+     aria-label="Context diagram: process 0, the Intelligent Context Engine, receives source content from a Source Repository; receives authenticated requests and questions from an AI Agent and returns context packages, acknowledgements and session knowledge; sends text to Model Providers and receives summaries, vectors and scores; and answers metrics queries from a Metrics Consumer.">
+
+  <!-- external entity: Source Repository -->
+  <rect x="40" y="60" width="220" height="80" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="150" y="95" text-anchor="middle" class="title" font-size="14">Source</text>
+  <text x="150" y="113" text-anchor="middle" class="title" font-size="14">Repository</text>
+  <text x="150" y="131" text-anchor="middle" class="flow" fill="var(--muted)">code · docs · web</text>
+
+  <!-- external entity: Model Providers -->
+  <rect x="680" y="40" width="220" height="90" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="790" y="75" text-anchor="middle" class="title" font-size="14">Model Providers</text>
+  <text x="790" y="95" text-anchor="middle" class="flow" fill="var(--muted)">summarization LLM ·</text>
+  <text x="790" y="110" text-anchor="middle" class="flow" fill="var(--muted)">embeddings · reranker</text>
+
+  <!-- external entity: AI Agent / Caller -->
+  <rect x="680" y="220" width="220" height="120" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="790" y="270" text-anchor="middle" class="title" font-size="14">AI Agent /</text>
+  <text x="790" y="288" text-anchor="middle" class="title" font-size="14">Caller</text>
+
+  <!-- external entity: Metrics Consumer -->
+  <rect x="340" y="440" width="220" height="80" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="450" y="475" text-anchor="middle" class="title" font-size="14">Metrics</text>
+  <text x="450" y="493" text-anchor="middle" class="title" font-size="14">Consumer</text>
+
+  <!-- process 0 -->
+  <rect x="340" y="220" width="220" height="120" rx="60" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <line x1="340" y1="250" x2="560" y2="250" stroke="var(--accent)"/>
+  <text x="450" y="242" text-anchor="middle" class="num" font-size="15">0</text>
+  <text x="450" y="280" text-anchor="middle" class="title" font-size="14">Intelligent Context</text>
+  <text x="450" y="298" text-anchor="middle" class="title" font-size="14">Engine (ICRO)</text>
+
+  <!-- flows -->
+  <path d="M260,100 L300,100 L300,260 L338,260" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="308" y="150" class="flow" fill="var(--muted)">source content</text>
+  <text x="308" y="164" class="flow" fill="var(--muted)">+ version info</text>
+
+  <path d="M500,222 L500,70 L678,70" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="492" y="150" text-anchor="end" class="flow" fill="var(--muted)">text to summarize,</text>
+  <text x="492" y="164" text-anchor="end" class="flow" fill="var(--muted)">embed, rerank</text>
+
+  <path d="M678,110 L540,110 L540,228" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="548" y="150" class="flow" fill="var(--muted)">summaries, vectors,</text>
+  <text x="548" y="164" class="flow" fill="var(--muted)">relevance scores</text>
+
+  <line x1="562" y1="260" x2="678" y2="260" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="620" y="236" text-anchor="middle" class="flow" fill="var(--muted)">context package,</text>
+  <text x="620" y="250" text-anchor="middle" class="flow" fill="var(--muted)">ack, session data</text>
+
+  <line x1="678" y1="300" x2="562" y2="300" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="620" y="318" text-anchor="middle" class="flow" fill="var(--muted)">request / question</text>
+  <text x="620" y="332" text-anchor="middle" class="flow" fill="var(--muted)">+ credential</text>
+
+  <line x1="430" y1="340" x2="430" y2="438" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="422" y="394" text-anchor="end" class="flow" fill="var(--muted)">task metrics,</text>
+  <text x="422" y="408" text-anchor="end" class="flow" fill="var(--muted)">comparisons</text>
+
+  <line x1="470" y1="438" x2="470" y2="342" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="478" y="394" class="flow" fill="var(--muted)">metrics query</text>
+</svg>
+    </div>
+    <figcaption>Process 0 is a black box here on purpose — everything it does
+      internally is Level 1's job to show. Every flow on this diagram reappears at Level 1,
+      and Level 1 adds none that cross this boundary.</figcaption>
+  </figure>
+
+  <h2>Level 1 — System Decomposition</h2>
+  <p class="sub">Six processes in three rows: ingest/index (write path), retrieve/deliver
+    (read path), and memory/metrics (support path). The <b style="color:var(--fg)">AI
+    Agent / Caller</b> is drawn four times and <b style="color:var(--fg)">Model Providers</b>
+    twice — the same entity each time, placed next to each process it actually talks to,
+    so no flow has to cross the whole page.</p>
+
+  <figure>
+    <div class="diagram-scroll">
+<svg viewBox="0 0 1150 980" width="1150" height="980" role="img"
+     aria-label="Level 1 data flow diagram with six processes — Ingest and Represent Source, Manage Multi-Index Store, Retrieve and Rank Evidence, Optimize and Deliver Context, Manage Context Memory, and Record and Report Metrics — four data stores, and the Source Repository, AI Agent, Model Providers and Metrics Consumer external entities connected to them. Process 3.0 reads the index store to search and the knowledge store to verify evidence.">
+
+  <!-- ================= ROW 1 : write path ================= -->
+  <rect x="30" y="80" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="130" y="110" text-anchor="middle" class="title" font-size="13">Source</text>
+  <text x="130" y="127" text-anchor="middle" class="title" font-size="13">Repository</text>
+
+  <rect x="30" y="225" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <path d="M222,232 L222,225 L229,225 Z" fill="var(--accent)"/>
+  <text x="130" y="253" text-anchor="middle" class="title" font-size="13">AI Agent /</text>
+  <text x="130" y="270" text-anchor="middle" class="title" font-size="13">Caller</text>
+
+  <rect x="300" y="80" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="300" y1="112" x2="520" y2="112" stroke="var(--fg)"/>
+  <text x="410" y="102" text-anchor="middle" class="num" font-size="14">1.0</text>
+  <text x="410" y="140" text-anchor="middle" class="title" font-size="13.5">Ingest &amp; Represent</text>
+  <text x="410" y="158" text-anchor="middle" class="title" font-size="13.5">Source</text>
+
+  <rect x="600" y="80" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="600" y1="112" x2="820" y2="112" stroke="var(--fg)"/>
+  <text x="710" y="102" text-anchor="middle" class="num" font-size="14">2.0</text>
+  <text x="710" y="140" text-anchor="middle" class="title" font-size="13.5">Manage Multi-Index</text>
+  <text x="710" y="158" text-anchor="middle" class="title" font-size="13.5">Store</text>
+
+  <rect x="890" y="80" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <path d="M1082,87 L1082,80 L1089,80 Z" fill="var(--accent)"/>
+  <text x="990" y="110" text-anchor="middle" class="title" font-size="13">Model Providers</text>
+  <text x="990" y="128" text-anchor="middle" class="flow" fill="var(--muted)">LLM · embeddings</text>
+
+  <path d="M480,80 L480,40 L1040,40 L1040,78" fill="none" stroke="currentColor" stroke-width="1.75"
+        marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="760" y="32" text-anchor="middle" class="flow" fill="var(--muted)">summarize (section text ↔ summaries)</text>
+
+  <line x1="820" y1="105" x2="888" y2="105" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="826" y="85" class="flow" fill="var(--muted)">text to</text>
+  <text x="826" y="98" class="flow" fill="var(--muted)">embed</text>
+  <line x1="888" y1="135" x2="822" y2="135" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="830" y="150" class="flow" fill="var(--muted)">vectors</text>
+
+  <!-- D1 / D2 -->
+  <line x1="300" y1="260" x2="520" y2="260" stroke="currentColor"/>
+  <line x1="300" y1="330" x2="520" y2="330" stroke="currentColor"/>
+  <text x="312" y="290" class="num" font-size="13">D1</text>
+  <text x="345" y="290" class="title" font-size="12.5">Resource &amp; Knowledge Store</text>
+  <text x="345" y="307" class="flow" fill="var(--muted)">resources · nodes · edges</text>
+
+  <line x1="600" y1="260" x2="820" y2="260" stroke="currentColor"/>
+  <line x1="600" y1="330" x2="820" y2="330" stroke="currentColor"/>
+  <text x="612" y="290" class="num" font-size="13">D2</text>
+  <text x="645" y="290" class="title" font-size="12.5">Multi-Index Store</text>
+  <text x="645" y="307" class="flow" fill="var(--muted)">semantic · lexical · graph · metadata</text>
+
+  <!-- flows row 1 -->
+  <line x1="230" y1="105" x2="298" y2="105" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="236" y="85" class="flow" fill="var(--muted)">source</text>
+  <text x="236" y="98" class="flow" fill="var(--muted)">content</text>
+
+  <line x1="230" y1="245" x2="300" y2="138" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="278" y="218" class="flow" fill="var(--muted)">ingest request ↗</text>
+
+  <line x1="300" y1="168" x2="230" y2="265" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="278" y="231" class="flow" fill="var(--muted)">resource ack ↙</text>
+
+  <line x1="360" y1="190" x2="360" y2="258" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="366" y="222" class="flow" fill="var(--muted)">write: resource</text>
+  <text x="366" y="235" class="flow" fill="var(--muted)">+ nodes</text>
+
+  <line x1="460" y1="258" x2="460" y2="190" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="466" y="222" class="flow" fill="var(--muted)">read: last</text>
+  <text x="466" y="235" class="flow" fill="var(--muted)">version</text>
+
+  <line x1="520" y1="125" x2="598" y2="125" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="559" y="103" text-anchor="middle" class="flow" fill="var(--muted)">nodes +</text>
+  <text x="559" y="116" text-anchor="middle" class="flow" fill="var(--muted)">relations</text>
+
+  <line x1="710" y1="190" x2="710" y2="258" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="716" y="228" class="flow" fill="var(--muted)">write: index</text>
+  <text x="716" y="241" class="flow" fill="var(--muted)">entries</text>
+
+  <line x1="790" y1="258" x2="790" y2="190" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="796" y="228" class="flow" fill="var(--muted)">read: existing</text>
+  <text x="796" y="241" class="flow" fill="var(--muted)">entries</text>
+
+  <!-- ================= ROW 2 : read path ================= -->
+  <rect x="30" y="420" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <path d="M222,427 L222,420 L229,420 Z" fill="var(--accent)"/>
+  <text x="130" y="448" text-anchor="middle" class="title" font-size="13">AI Agent /</text>
+  <text x="130" y="465" text-anchor="middle" class="title" font-size="13">Caller</text>
+
+  <rect x="300" y="420" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="300" y1="452" x2="520" y2="452" stroke="var(--fg)"/>
+  <text x="410" y="442" text-anchor="middle" class="num" font-size="14">3.0</text>
+  <text x="410" y="480" text-anchor="middle" class="title" font-size="13.5">Retrieve &amp; Rank</text>
+  <text x="410" y="498" text-anchor="middle" class="title" font-size="13.5">Evidence</text>
+
+  <rect x="600" y="420" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="600" y1="452" x2="820" y2="452" stroke="var(--fg)"/>
+  <text x="710" y="442" text-anchor="middle" class="num" font-size="14">4.0</text>
+  <text x="710" y="480" text-anchor="middle" class="title" font-size="13.5">Optimize &amp; Deliver</text>
+  <text x="710" y="498" text-anchor="middle" class="title" font-size="13.5">Context</text>
+
+  <rect x="890" y="420" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <path d="M1082,427 L1082,420 L1089,420 Z" fill="var(--accent)"/>
+  <text x="990" y="448" text-anchor="middle" class="title" font-size="13">AI Agent /</text>
+  <text x="990" y="465" text-anchor="middle" class="title" font-size="13">Caller</text>
+
+  <!-- flows row 2 -->
+  <line x1="230" y1="465" x2="298" y2="465" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="236" y="458" class="flow" fill="var(--muted)">question</text>
+
+  <line x1="520" y1="475" x2="598" y2="475" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="545" y="454" class="flow" fill="var(--muted)">ranked</text>
+  <text x="545" y="467" class="flow" fill="var(--muted)">evidence</text>
+
+  <line x1="820" y1="465" x2="888" y2="465" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="826" y="445" class="flow" fill="var(--muted)">context</text>
+  <text x="826" y="458" class="flow" fill="var(--muted)">package</text>
+
+  <!-- D2 -> P3 search (a read), crosses the backbone -->
+  <path d="M710,330 L710,378 L410,378 L410,418" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="640" y="368" text-anchor="middle" class="flow" fill="var(--muted)">read: index search (tenant-scoped)</text>
+
+  <!-- D1 -> P3 verification -->
+  <line x1="330" y1="330" x2="330" y2="418" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="324" y="364" text-anchor="end" class="flow" fill="var(--muted)">verify: current version</text>
+  <text x="324" y="377" text-anchor="end" class="flow" fill="var(--muted)">+ original passage</text>
+
+  <!-- Model Providers B: reranking for P3 -->
+  <rect x="30" y="505" width="200" height="60" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <path d="M222,512 L222,505 L229,505 Z" fill="var(--accent)"/>
+  <text x="130" y="532" text-anchor="middle" class="title" font-size="13">Model Providers</text>
+  <text x="130" y="550" text-anchor="middle" class="flow" fill="var(--muted)">reranker</text>
+  <line x1="230" y1="518" x2="298" y2="518" stroke="currentColor" stroke-width="1.75"
+        marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="236" y="511" class="flow" fill="var(--muted)">rerank</text>
+
+  <!-- ================= backbone: P1 writes seed straight down to P5 ================= -->
+  <path d="M520,135 L535,135 L535,735 L520,735" fill="none" stroke="var(--accent)" stroke-width="1.75"
+        stroke-dasharray="1 5" marker-end="url(#arrowAccent)"/>
+  <text x="545" y="208" class="flow" fill="var(--accent)">nodes + superseded</text>
+  <text x="545" y="221" class="flow" fill="var(--accent)">version (seed / purge</text>
+  <text x="545" y="234" class="flow" fill="var(--accent)">document cache)</text>
+
+  <!-- ================= ROW 3 : support path ================= -->
+  <rect x="30" y="680" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <path d="M222,687 L222,680 L229,680 Z" fill="var(--accent)"/>
+  <text x="130" y="708" text-anchor="middle" class="title" font-size="13">AI Agent /</text>
+  <text x="130" y="725" text-anchor="middle" class="title" font-size="13">Caller</text>
+
+  <rect x="300" y="680" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="300" y1="712" x2="520" y2="712" stroke="var(--fg)"/>
+  <text x="410" y="702" text-anchor="middle" class="num" font-size="14">5.0</text>
+  <text x="410" y="740" text-anchor="middle" class="title" font-size="13.5">Manage Context</text>
+  <text x="410" y="758" text-anchor="middle" class="title" font-size="13.5">Memory</text>
+
+  <rect x="600" y="680" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="600" y1="712" x2="820" y2="712" stroke="var(--fg)"/>
+  <text x="710" y="702" text-anchor="middle" class="num" font-size="14">6.0</text>
+  <text x="710" y="740" text-anchor="middle" class="title" font-size="13.5">Record &amp; Report</text>
+  <text x="710" y="758" text-anchor="middle" class="title" font-size="13.5">Metrics</text>
+
+  <rect x="890" y="680" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="990" y="708" text-anchor="middle" class="title" font-size="13">Metrics</text>
+  <text x="990" y="725" text-anchor="middle" class="title" font-size="13">Consumer</text>
+
+  <!-- D3 / D4 -->
+  <line x1="300" y1="850" x2="520" y2="850" stroke="currentColor"/>
+  <line x1="300" y1="920" x2="520" y2="920" stroke="currentColor"/>
+  <text x="312" y="880" class="num" font-size="13">D3</text>
+  <text x="345" y="880" class="title" font-size="12.5">Context Memory Cache</text>
+  <text x="345" y="897" class="flow" fill="var(--muted)">document · evidence · session</text>
+
+  <line x1="600" y1="850" x2="820" y2="850" stroke="currentColor"/>
+  <line x1="600" y1="920" x2="820" y2="920" stroke="currentColor"/>
+  <text x="612" y="880" class="num" font-size="13">D4</text>
+  <text x="645" y="880" class="title" font-size="12.5">Metrics Store</text>
+  <text x="645" y="897" class="flow" fill="var(--muted)">task_metrics</text>
+
+  <!-- flows row 3 -->
+  <line x1="230" y1="707" x2="298" y2="707" stroke="currentColor" stroke-width="1.75"
+        marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="236" y="687" class="flow" fill="var(--muted)">session</text>
+  <text x="236" y="700" class="flow" fill="var(--muted)">get / put</text>
+
+  <line x1="360" y1="790" x2="360" y2="848" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="366" y="818" class="flow" fill="var(--muted)">write: cache</text>
+
+  <line x1="460" y1="848" x2="460" y2="790" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="466" y="818" class="flow" fill="var(--muted)">read: cache</text>
+
+  <line x1="710" y1="790" x2="710" y2="848" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="716" y="818" class="flow" fill="var(--muted)">write: metrics</text>
+
+  <line x1="790" y1="848" x2="790" y2="790" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="796" y="818" class="flow" fill="var(--muted)">read: records</text>
+
+  <line x1="820" y1="707" x2="888" y2="707" stroke="currentColor" stroke-width="1.75"
+        marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="826" y="687" class="flow" fill="var(--muted)">query /</text>
+  <text x="826" y="700" class="flow" fill="var(--muted)">result</text>
+
+  <!-- P3 <-> P5 evidence cache, direct vertical, col L, rows 2-3 gap -->
+  <line x1="360" y1="530" x2="360" y2="678" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="366" y="600" class="flow" fill="var(--muted)">evidence lookup</text>
+
+  <line x1="460" y1="678" x2="460" y2="530" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="466" y="600" class="flow" fill="var(--muted)">cached evidence</text>
+
+  <!-- P4 -> P6 task metrics, direct vertical, col R, rows 2-3 gap -->
+  <line x1="710" y1="530" x2="710" y2="678" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="716" y="608" class="flow" fill="var(--muted)">task metrics</text>
+</svg>
+    </div>
+    <figcaption>Rows read top to bottom as write path, read path, and support path.
+      Flows that cross rows: 1.0 → 5.0 (dashed accent: new nodes, and the superseded
+      version whose cache entries must go), D2 → 3.0 (index search), D1 → 3.0 (every piece
+      of evidence is re-checked against its current version and original passage before it
+      leaves 3.0), 3.0 ↔ 5.0 (evidence cache) and 4.0 → 6.0 (task metrics). Every request
+      from the AI Agent carries its credential; the tenant it resolves to scopes every
+      store read.</figcaption>
+    <div class="legend">
+      <span><svg class="lshape" viewBox="0 0 30 18"><rect x="1" y="1" width="28" height="16" rx="6" fill="none" stroke="currentColor"/></svg>process</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><rect x="1" y="1" width="28" height="16" fill="none" stroke="currentColor"/></svg>external entity</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><line x1="1" y1="3" x2="29" y2="3" stroke="currentColor"/><line x1="1" y1="15" x2="29" y2="15" stroke="currentColor"/></svg>data store</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><line x1="1" y1="9" x2="24" y2="9" stroke="currentColor" marker-end="url(#arrow)"/></svg>data flow</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><path d="M20,2 L20,-5 L27,-5 Z" transform="translate(0,7)" fill="var(--accent)"/><rect x="1" y="1" width="28" height="16" fill="none" stroke="currentColor"/></svg>repeated entity (same one, drawn near each process it talks to)</span>
+    </div>
+  </figure>
+
+  <p class="note"><b>Reading the two levels together:</b> Level 0 is the promise made to
+    the outside world — hand over a source or a question, get back a context package or
+    an ack. Level 1 is how that promise is kept: two processes that only run when a
+    source is new or changed (1.0, 2.0), two that run on every question (3.0, 4.0), and
+    two supporting processes that make the first four cheaper over time (5.0, 6.0). The
+    stores map directly onto <span style="color:var(--fg)">infra/postgres/init.sql</span>
+    (D1/D2) and the <span style="color:var(--fg)">ICE.ContextMemory</span> /
+    <span style="color:var(--fg)">ICE.Evaluation</span> services (D3/D4).</p>
+</div>

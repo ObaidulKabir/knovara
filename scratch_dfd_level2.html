@@ -1,0 +1,591 @@
+<title>ICRO Level 2 DFDs</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* layout concept: six small, mostly-linear pipelines, one per Level 1 process;
+   every box that isn't decomposed here (another process, a store, an external
+   entity) is drawn muted/dashed as a boundary reference, so each diagram's
+   external edges visibly match what Level 1 already drew for that process */
+:root{
+  --bg:#f6f5f1; --surface:#ffffff; --surface-2:#ececE6;
+  --border:#cfcbc1; --fg:#1c1a16; --muted:#6b6658;
+  --accent:#b5541f; --accent-soft:#f1e3d6;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15130f; --surface:#1d1a15; --surface-2:#262219;
+    --border:#443e30; --fg:#efeae0; --muted:#a39a87;
+    --accent:#e08a4f; --accent-soft:#3a2a1c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15130f; --surface:#1d1a15; --surface-2:#262219;
+  --border:#443e30; --fg:#efeae0; --muted:#a39a87;
+  --accent:#e08a4f; --accent-soft:#3a2a1c;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Inter",system-ui,sans-serif;}
+.wrap{max-width:1180px;margin:0 auto;padding:40px 0 64px;}
+h1{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;
+  font-size:clamp(26px,4vw,36px);letter-spacing:-0.01em;margin:0 0 6px;}
+.kicker{font-family:"Space Grotesk",system-ui,sans-serif;font-size:13px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+.lede{max-width:700px;color:var(--muted);font-size:15.5px;line-height:1.55;margin:0 0 20px;}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 36px;}
+nav a{font-size:12.5px;font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;
+  color:var(--fg);text-decoration:none;border:1px solid var(--border);border-radius:999px;
+  padding:6px 14px;background:var(--surface-2);}
+nav a:hover{border-color:var(--accent);color:var(--accent);}
+h2{font-family:"Space Grotesk",system-ui,sans-serif;font-size:19px;font-weight:600;margin:0 0 4px;
+  scroll-margin-top:20px;}
+.proc-of{font-size:12.5px;color:var(--accent);font-family:"Space Grotesk",system-ui,sans-serif;
+  text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;}
+.sub{color:var(--muted);font-size:14px;margin:0 0 16px;max-width:720px;line-height:1.5;}
+section{margin:56px 0 0;padding-top:12px;border-top:1px solid var(--border);}
+section:first-of-type{border-top:none;}
+figure{margin:0;}
+.diagram-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface);padding:12px 4px;}
+.diagram-scroll svg{display:block;margin:0 auto;}
+figcaption{color:var(--muted);font-size:13.5px;line-height:1.5;margin-top:10px;max-width:780px;}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin:18px 0 0;font-size:12.5px;color:var(--muted);
+  border-top:1px solid var(--border);padding-top:16px;}
+.legend span{display:inline-flex;align-items:center;gap:8px;}
+.lshape{width:30px;height:18px;flex:none;}
+svg text{font-family:"Inter",system-ui,sans-serif;fill:currentColor;}
+svg .title{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;}
+svg .num{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;fill:var(--accent);}
+svg .flow{font-size:11px;}
+svg .ref-box{fill:var(--surface);stroke:var(--muted);stroke-width:1.25;stroke-dasharray:3 3;}
+svg .ref-text{fill:var(--muted);}
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+    </marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <p class="kicker">ICE / ICRO</p>
+  <h1>Level 2 — Six Subsystems</h1>
+  <p class="lede">Each Level 1 process opened up into its own sub-processes. Every
+    diagram's external edges are exactly what Level 1 already showed entering and
+    leaving that process — nothing new crosses the boundary, only the inside gets
+    more detailed. Dashed, muted boxes are boundary references (another process, a
+    store, an external entity); solid boxes are decomposed here.</p>
+
+  <nav>
+    <a href="#p1">1.0 Ingest &amp; Represent</a>
+    <a href="#p2">2.0 Multi-Index</a>
+    <a href="#p3">3.0 Retrieve &amp; Rank</a>
+    <a href="#p4">4.0 Optimize &amp; Deliver</a>
+    <a href="#p5">5.0 Context Memory</a>
+    <a href="#p6">6.0 Metrics</a>
+  </nav>
+
+  <!-- ======================================================================= -->
+  <section id="p1">
+    <p class="proc-of">Decomposes process 1.0</p>
+    <h2>Ingest &amp; Represent Source</h2>
+    <p class="sub">Splits into the two services that back it: ingestion authorizes the caller, registers the resource once per (tenant, URI) and stops if the version is unchanged; representation turns new structure into the hierarchy other processes consume.</p>
+    <figure>
+      <div class="diagram-scroll">
+<svg viewBox="0 0 1160 430" width="1160" height="430" role="img"
+     aria-label="Process 1.0 decomposed into Authorize, Register and Check Version; Format-Aware Extraction; Build Hierarchy and Summarize, which calls the summarization model; and Extract Relationships. It reads and writes the Resource and Knowledge Store and feeds processes 2.0 and 5.0.">
+  <rect class="ref-box" x="20" y="135" width="170" height="55"/>
+  <text x="105" y="166" text-anchor="middle" class="ref-text title" font-size="12.5">Source Repository</text>
+  <rect class="ref-box" x="20" y="215" width="170" height="55"/>
+  <text x="105" y="246" text-anchor="middle" class="ref-text title" font-size="12.5">AI Agent / Caller</text>
+  <rect class="ref-box" x="440" y="30" width="180" height="60"/>
+  <text x="530" y="56" text-anchor="middle" class="ref-text title" font-size="11.5">Model Providers</text>
+  <text x="530" y="72" text-anchor="middle" class="ref-text title" font-size="11.5">summarization LLM</text>
+  <rect class="ref-box" x="720" y="30" width="180" height="60" rx="30"/>
+  <text x="810" y="56" text-anchor="middle" class="ref-text title" font-size="11.5">2.0 Manage</text>
+  <text x="810" y="72" text-anchor="middle" class="ref-text title" font-size="11.5">Multi-Index Store</text>
+  <rect class="ref-box" x="930" y="30" width="200" height="60" rx="30"/>
+  <text x="1030" y="56" text-anchor="middle" class="ref-text title" font-size="11.5">5.0 Manage</text>
+  <text x="1030" y="72" text-anchor="middle" class="ref-text title" font-size="11.5">Context Memory</text>
+  <rect x="240" y="150" width="170" height="95" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="240" y1="180" x2="410" y2="180" stroke="var(--fg)"/>
+  <text x="325" y="172" text-anchor="middle" class="num" font-size="13">1.1</text>
+  <text x="325" y="197" text-anchor="middle" class="title" font-size="12.5">Authorize,</text>
+  <text x="325" y="212" text-anchor="middle" class="title" font-size="12.5">Register &amp;</text>
+  <text x="325" y="227" text-anchor="middle" class="title" font-size="12.5">Check Version</text>
+  <rect x="460" y="150" width="170" height="95" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="460" y1="180" x2="630" y2="180" stroke="var(--fg)"/>
+  <text x="545" y="172" text-anchor="middle" class="num" font-size="13">1.2</text>
+  <text x="545" y="202" text-anchor="middle" class="title" font-size="12.5">Format-Aware</text>
+  <text x="545" y="219" text-anchor="middle" class="title" font-size="12.5">Extraction</text>
+  <rect x="680" y="150" width="170" height="95" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="680" y1="180" x2="850" y2="180" stroke="var(--fg)"/>
+  <text x="765" y="172" text-anchor="middle" class="num" font-size="13">1.3</text>
+  <text x="765" y="202" text-anchor="middle" class="title" font-size="12.5">Build Hierarchy</text>
+  <text x="765" y="219" text-anchor="middle" class="title" font-size="12.5">&amp; Summarize</text>
+  <rect x="900" y="150" width="170" height="95" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="900" y1="180" x2="1070" y2="180" stroke="var(--fg)"/>
+  <text x="985" y="172" text-anchor="middle" class="num" font-size="13">1.4</text>
+  <text x="985" y="202" text-anchor="middle" class="title" font-size="12.5">Extract</text>
+  <text x="985" y="219" text-anchor="middle" class="title" font-size="12.5">Relationships</text>
+  <line x1="240" y1="340" x2="1070" y2="340" stroke="currentColor"/>
+  <line x1="240" y1="400" x2="1070" y2="400" stroke="currentColor"/>
+  <text x="252" y="368" class="num" font-size="13">D1</text>
+  <text x="285" y="368" class="title" font-size="12.5">Resource &amp; Knowledge Store</text>
+  <text x="252" y="386" class="flow" fill="var(--muted)">resources · knowledge_nodes · edges</text>
+  <line x1="190" y1="170" x2="238" y2="170" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="20" y="128" class="flow" fill="var(--muted)">source content →</text>
+  <line x1="190" y1="225" x2="238" y2="225" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="20" y="208" class="flow" fill="var(--muted)">ingest request →</text>
+  <line x1="238" y1="240" x2="190" y2="240" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="20" y="288" class="flow" fill="var(--muted)">← resource ack</text>
+  <path d="M300,245 L300,338" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="294" y="296" text-anchor="end" class="flow" fill="var(--muted)">write: new version</text>
+  <path d="M350,338 L350,245" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="356" y="296" class="flow" fill="var(--muted)">read: last version</text>
+  <path d="M410,197 L458,197" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="435" y="140" text-anchor="middle" class="flow" fill="var(--muted)">new version only</text>
+  <path d="M630,197 L678,197" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="655" y="140" text-anchor="middle" class="flow" fill="var(--muted)">raw nodes</text>
+  <path d="M760,245 L760,338" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="752" y="296" text-anchor="end" class="flow" fill="var(--muted)">write: nodes + summaries</text>
+  <path d="M850,197 L898,197" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="875" y="218" text-anchor="middle" class="flow" fill="var(--muted)">hierarchy</text>
+  <path d="M985,245 L985,338" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="992" y="296" class="flow" fill="var(--muted)">write: edges</text>
+  <path d="M700,150 L700,60 L622,60" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="692" y="110" text-anchor="end" class="flow" fill="var(--muted)">summarize</text>
+  <path d="M800,150 L800,92" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="806" y="108" class="flow" fill="var(--muted)">nodes + relations</text>
+  <path d="M840,150 L840,128 L1030,128 L1030,92" fill="none" stroke="var(--accent)" stroke-width="1.75" stroke-dasharray="1 5" marker-end="url(#arrowAccent)"/>
+  <text x="850" y="122" class="flow" fill="var(--accent)">nodes + superseded version</text>
+</svg>
+      </div>
+      <figcaption>1.1 is where an unchanged source stops: it acknowledges the caller and nothing downstream runs. On a new version, 1.1 passes the old version along so 1.3 can tell 5.0 which cache entries to purge, and 2.0 replaces that resource's index entries when the new nodes arrive.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ======================================================================= -->
+  <section id="p2">
+    <p class="proc-of">Decomposes process 2.0</p>
+    <h2>Manage Multi-Index Store</h2>
+    <p class="sub">One entry point checks whether a resource is already indexed and
+      clears stale entries before the four index types are written in parallel.</p>
+    <figure>
+      <div class="diagram-scroll">
+<svg viewBox="0 0 1220 500" width="1220" height="500" role="img"
+     aria-label="Process 2.0 decomposed into Check Existing Index, Invalidate Stale Entries, and four parallel writers for semantic, lexical, relationship and structural indexes, all reading nodes from process 1.0 and writing to the Multi-Index Store.">
+
+  <rect class="ref-box" x="20" y="195" width="190" height="60"/>
+  <text x="115" y="230" text-anchor="middle" class="ref-text title" font-size="12.5">1.0 Ingest &amp;</text>
+  <text x="115" y="246" text-anchor="middle" class="ref-text title" font-size="11">Represent Source</text>
+
+  <rect x="260" y="165" width="180" height="95" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="260" y1="195" x2="440" y2="195" stroke="var(--fg)"/>
+  <text x="350" y="187" text-anchor="middle" class="num" font-size="13">2.1</text>
+  <text x="350" y="217" text-anchor="middle" class="title" font-size="12.5">Check Existing</text>
+  <text x="350" y="234" text-anchor="middle" class="title" font-size="12.5">Index</text>
+
+  <rect x="260" y="330" width="180" height="95" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="260" y1="360" x2="440" y2="360" stroke="var(--fg)"/>
+  <text x="350" y="352" text-anchor="middle" class="num" font-size="13">2.2</text>
+  <text x="350" y="382" text-anchor="middle" class="title" font-size="12.5">Invalidate Stale</text>
+  <text x="350" y="399" text-anchor="middle" class="title" font-size="12.5">Entries</text>
+
+  <rect x="540" y="20" width="180" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="540" y1="48" x2="720" y2="48" stroke="var(--fg)"/>
+  <text x="630" y="40" text-anchor="middle" class="num" font-size="13">2.3</text>
+  <text x="630" y="68" text-anchor="middle" class="title" font-size="12.5">Index Semantic</text>
+  <text x="630" y="85" text-anchor="middle" class="flow" fill="var(--muted)">vector embedding</text>
+
+  <rect x="540" y="140" width="180" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="540" y1="168" x2="720" y2="168" stroke="var(--fg)"/>
+  <text x="630" y="160" text-anchor="middle" class="num" font-size="13">2.4</text>
+  <text x="630" y="188" text-anchor="middle" class="title" font-size="12.5">Index Lexical</text>
+  <text x="630" y="205" text-anchor="middle" class="flow" fill="var(--muted)">BM25 / full text</text>
+
+  <rect x="540" y="260" width="180" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="540" y1="288" x2="720" y2="288" stroke="var(--fg)"/>
+  <text x="630" y="280" text-anchor="middle" class="num" font-size="13">2.5</text>
+  <text x="630" y="308" text-anchor="middle" class="title" font-size="12.5">Index Relationships</text>
+  <text x="630" y="325" text-anchor="middle" class="flow" fill="var(--muted)">graph edges</text>
+
+  <rect x="540" y="380" width="180" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="540" y1="408" x2="720" y2="408" stroke="var(--fg)"/>
+  <text x="630" y="400" text-anchor="middle" class="num" font-size="13">2.6</text>
+  <text x="630" y="428" text-anchor="middle" class="title" font-size="12.5">Index Structural</text>
+  <text x="630" y="445" text-anchor="middle" class="flow" fill="var(--muted)">hierarchy / metadata</text>
+
+  <!-- D2 -->
+  <line x1="800" y1="215" x2="1200" y2="215" stroke="currentColor"/>
+  <line x1="800" y1="275" x2="1200" y2="275" stroke="currentColor"/>
+  <text x="812" y="243" class="num" font-size="13">D2</text>
+  <text x="845" y="243" class="title" font-size="12.5">Multi-Index Store</text>
+  <text x="812" y="261" class="flow" fill="var(--muted)">semantic · lexical · graph · metadata</text>
+
+  <!-- flows -->
+  <line x1="210" y1="220" x2="258" y2="210" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="20" y="188" class="flow" fill="var(--muted)">nodes + relations →</text>
+
+  <path d="M440,230 L780,245" fill="none" stroke="currentColor" stroke-width="1.5" marker-start="url(#arrow)"/>
+  <text x="600" y="226" text-anchor="middle" class="flow" fill="var(--muted)">read: existing entries</text>
+
+  <rect class="ref-box" x="900" y="15" width="200" height="55"/>
+  <text x="1000" y="38" text-anchor="middle" class="ref-text title" font-size="12">Model Providers</text>
+  <text x="1000" y="54" text-anchor="middle" class="ref-text title" font-size="11">embedding model</text>
+  <path d="M720,40 L898,40" fill="none" stroke="currentColor" stroke-width="1.5"
+        marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="730" y="33" class="flow" fill="var(--muted)">embed (text ↔ vectors)</text>
+
+  <line x1="350" y1="260" x2="350" y2="328" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="358" y="298" class="flow" fill="var(--muted)">stale entries found</text>
+
+  <path d="M440,400 L480,400 L480,480 L810,480 L810,277" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="600" y="473" text-anchor="middle" class="flow" fill="var(--muted)">delete stale entries</text>
+
+  <path d="M350,165 L350,95 L538,62" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M350,165 L350,100 L538,182" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M440,195 L538,300" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M440,235 L480,235 L480,420 L538,420" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="430" y="130" class="flow" fill="var(--muted)">nodes</text>
+  <text x="430" y="165" class="flow" fill="var(--muted)">nodes</text>
+  <text x="446" y="255" class="flow" fill="var(--muted)">edges</text>
+  <text x="486" y="320" class="flow" fill="var(--muted)">nodes</text>
+
+  <line x1="720" y1="62" x2="798" y2="200" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="720" y1="182" x2="798" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="720" y1="300" x2="798" y2="245" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="720" y1="420" x2="798" y2="265" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="726" y="95" class="flow" fill="var(--muted)">write: vector</text>
+  <text x="726" y="178" class="flow" fill="var(--muted)">write: keyword</text>
+  <text x="726" y="298" class="flow" fill="var(--muted)">write: graph</text>
+  <text x="726" y="418" class="flow" fill="var(--muted)">write: metadata</text>
+</svg>
+      </div>
+      <figcaption>2.1 and 2.2 only matter on a re-ingested resource; a brand-new
+        resource skips straight to the four writers. This whole subsystem's only
+        external edges are "nodes + relations" in from 1.0 and index writes into D2 —
+        exactly what Level 1 showed, plus the read of existing entries and the embedding
+        call, which Level 1 now draws too.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ======================================================================= -->
+  <section id="p3">
+    <p class="proc-of">Decomposes process 3.0</p>
+    <h2>Retrieve &amp; Rank Evidence</h2>
+    <p class="sub">The evidence cache is checked before any index search, keyed by tenant, normalized question and index version. Past that, retrieval escalates only as far as the sufficiency check requires, and nothing leaves until 3.6 has re-read each cited passage at its current version.</p>
+    <figure>
+      <div class="diagram-scroll">
+<svg viewBox="0 0 1630 470" width="1630" height="470" role="img"
+     aria-label="Process 3.0 decomposed into Authorize and Analyze Query, Check Evidence Cache, Coarse Retrieval, Targeted Retrieval with a reranker, a sufficiency decision with an Expand Context loop, and Verify Against Current Source, which reads the Resource and Knowledge Store before evidence goes to process 4.0.">
+  <rect class="ref-box" x="20" y="112" width="160" height="55"/>
+  <text x="100" y="144" text-anchor="middle" class="ref-text title" font-size="12.5">AI Agent / Caller</text>
+  <rect x="220" y="100" width="150" height="90" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="220" y1="130" x2="370" y2="130" stroke="var(--fg)"/>
+  <text x="295" y="122" text-anchor="middle" class="num" font-size="13">3.1</text>
+  <text x="295" y="152" text-anchor="middle" class="title" font-size="12">Authorize &amp;</text>
+  <text x="295" y="169" text-anchor="middle" class="title" font-size="12">Analyze Query</text>
+  <rect x="410" y="100" width="160" height="90" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="410" y1="130" x2="570" y2="130" stroke="var(--fg)"/>
+  <text x="490" y="122" text-anchor="middle" class="num" font-size="13">3.2</text>
+  <text x="490" y="152" text-anchor="middle" class="title" font-size="12">Check Evidence</text>
+  <text x="490" y="169" text-anchor="middle" class="title" font-size="12">Cache</text>
+  <rect class="ref-box" x="410" y="15" width="160" height="55" rx="27"/>
+  <text x="490" y="39" text-anchor="middle" class="ref-text title" font-size="11.5">5.0 Manage</text>
+  <text x="490" y="54" text-anchor="middle" class="ref-text title" font-size="11.5">Context Memory</text>
+  <rect x="610" y="100" width="150" height="90" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="610" y1="130" x2="760" y2="130" stroke="var(--fg)"/>
+  <text x="685" y="122" text-anchor="middle" class="num" font-size="13">3.3</text>
+  <text x="685" y="152" text-anchor="middle" class="title" font-size="12">Coarse</text>
+  <text x="685" y="169" text-anchor="middle" class="title" font-size="12">Retrieval</text>
+  <rect x="800" y="100" width="150" height="90" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="800" y1="130" x2="950" y2="130" stroke="var(--fg)"/>
+  <text x="875" y="122" text-anchor="middle" class="num" font-size="13">3.4</text>
+  <text x="875" y="152" text-anchor="middle" class="title" font-size="12">Targeted</text>
+  <text x="875" y="169" text-anchor="middle" class="title" font-size="12">Retrieval</text>
+  <rect class="ref-box" x="815" y="50" width="120" height="40"/>
+  <text x="875" y="66" text-anchor="middle" class="ref-text title" font-size="10.5">Model Providers</text>
+  <text x="875" y="82" text-anchor="middle" class="ref-text title" font-size="10.5">reranker</text>
+  <polygon points="1090,145 1150,90 1210,145 1150,200" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="1150" y="140" text-anchor="middle" font-size="11.5">evidence</text>
+  <text x="1150" y="155" text-anchor="middle" font-size="11.5">sufficient?</text>
+  <rect x="1055" y="245" width="150" height="90" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="1055" y1="275" x2="1205" y2="275" stroke="var(--fg)"/>
+  <text x="1130" y="267" text-anchor="middle" class="num" font-size="13">3.5</text>
+  <text x="1130" y="297" text-anchor="middle" class="title" font-size="12">Expand</text>
+  <text x="1130" y="314" text-anchor="middle" class="title" font-size="12">Context</text>
+  <rect x="1260" y="100" width="150" height="90" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="1260" y1="130" x2="1410" y2="130" stroke="var(--fg)"/>
+  <text x="1335" y="122" text-anchor="middle" class="num" font-size="13">3.6</text>
+  <text x="1335" y="152" text-anchor="middle" class="title" font-size="12">Verify Against</text>
+  <text x="1335" y="169" text-anchor="middle" class="title" font-size="12">Current Source</text>
+  <rect class="ref-box" x="1460" y="117" width="150" height="55" rx="27"/>
+  <text x="1535" y="141" text-anchor="middle" class="ref-text title" font-size="11.5">4.0 Optimize &amp;</text>
+  <text x="1535" y="156" text-anchor="middle" class="ref-text title" font-size="11.5">Deliver Context</text>
+  <rect class="ref-box" x="610" y="390" width="595" height="55"/>
+  <text x="907" y="422" text-anchor="middle" class="ref-text title" font-size="12.5">D2 Multi-Index Store</text>
+  <rect class="ref-box" x="1260" y="390" width="200" height="55"/>
+  <text x="1360" y="414" text-anchor="middle" class="ref-text title" font-size="12">D1 Resource &amp;</text>
+  <text x="1360" y="429" text-anchor="middle" class="ref-text title" font-size="12">Knowledge Store</text>
+  <path d="M180,140 L218,140" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="200" y="92" text-anchor="middle" class="flow" fill="var(--muted)">question</text>
+  <path d="M370,140 L408,140" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="390" y="92" text-anchor="middle" class="flow" fill="var(--muted)">normalized query</text>
+  <path d="M490,100 L490,72" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="498" y="90" class="flow" fill="var(--muted)">lookup / result</text>
+  <path d="M575,112 C575,8 1150,8 1150,88" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="2 6" marker-end="url(#arrowAccent)"/>
+  <text x="860" y="22" text-anchor="middle" class="flow" fill="var(--accent)">key hit → skip 3.3–3.5 (versions still checked in 3.6)</text>
+  <path d="M570,155 L608,155" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="590" y="175" text-anchor="middle" class="flow" fill="var(--muted)">miss</text>
+  <path d="M760,140 L798,140" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="780" y="92" text-anchor="middle" class="flow" fill="var(--muted)">candidates</text>
+  <path d="M875,98 L875,92" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="942" y="80" class="flow" fill="var(--muted)">rerank</text>
+  <path d="M950,143 L1088,144" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="965" y="134" class="flow" fill="var(--muted)">ranked candidates</text>
+  <path d="M1155,200 L1155,222 L1135,243" fill="none" stroke="currentColor" stroke-width="1.75" stroke-dasharray="1 5" marker-end="url(#arrow)"/>
+  <text x="1160" y="225" class="flow" fill="var(--muted)">no → expand</text>
+  <text x="1160" y="238" class="flow" fill="var(--muted)">(bounded budget)</text>
+  <path d="M1100,245 L1100,210 L1115,195" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1092" y="233" text-anchor="end" class="flow" fill="var(--muted)">expanded</text>
+  <path d="M1210,145 L1258,145" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1234" y="136" text-anchor="middle" class="flow" fill="var(--muted)">yes</text>
+  <path d="M1410,145 L1458,145" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1434" y="92" text-anchor="middle" class="flow" fill="var(--muted)">verified evidence</text>
+  <path d="M1330,388 L1330,192" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1338" y="290" class="flow" fill="var(--muted)">read: current version</text>
+  <text x="1338" y="303" class="flow" fill="var(--muted)">+ original passage</text>
+  <path d="M685,192 L770,388" fill="none" stroke="currentColor" stroke-width="1.5" marker-start="url(#arrow)"/>
+  <path d="M875,192 L875,388" fill="none" stroke="currentColor" stroke-width="1.5" marker-start="url(#arrow)"/>
+  <path d="M1130,337 L1130,388" fill="none" stroke="currentColor" stroke-width="1.5" marker-start="url(#arrow)"/>
+  <text x="760" y="300" class="flow" fill="var(--muted)">read: summaries</text>
+  <text x="882" y="340" class="flow" fill="var(--muted)">read: passages</text>
+  <text x="1137" y="368" class="flow" fill="var(--muted)">read: neighbors</text>
+</svg>
+      </div>
+      <figcaption>The accent path is the query-time saving: a valid key hit skips searching, not checking. 3.6 drops any evidence whose source has a newer version or whose original passage no longer matches; a cached answer that loses evidence this way is evicted and the question is retried as a cache miss. These internal steps sit behind the same edges Level 1 drew for 3.0: question in, evidence lookup with 5.0, reads of D1 and D2, rerank, ranked evidence out.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ======================================================================= -->
+  <section id="p4">
+    <p class="proc-of">Decomposes process 4.0</p>
+    <h2>Optimize &amp; Deliver Context</h2>
+    <p class="sub">A short, linear pipeline: thin the evidence down, fit it to budget,
+      package it with citations, and report what that cost.</p>
+    <figure>
+      <div class="diagram-scroll">
+<svg viewBox="0 0 1180 340" width="1180" height="340" role="img"
+     aria-label="Process 4.0 decomposed into Deduplicate Evidence, Apply Token Budget, Assemble Context Package, and Emit Task Metrics, reading ranked evidence from process 3.0 and delivering a context package to the AI Agent and task metrics to process 6.0.">
+
+  <rect class="ref-box" x="20" y="115" width="170" height="60"/>
+  <text x="105" y="140" text-anchor="middle" class="ref-text title" font-size="12">3.0 Retrieve &amp;</text>
+  <text x="105" y="156" text-anchor="middle" class="ref-text title" font-size="12">Rank Evidence</text>
+
+  <rect x="240" y="105" width="170" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="240" y1="133" x2="410" y2="133" stroke="var(--fg)"/>
+  <text x="325" y="125" text-anchor="middle" class="num" font-size="13">4.1</text>
+  <text x="325" y="155" text-anchor="middle" class="title" font-size="12.5">Deduplicate</text>
+  <text x="325" y="172" text-anchor="middle" class="title" font-size="12.5">Evidence</text>
+
+  <rect x="460" y="105" width="170" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="460" y1="133" x2="630" y2="133" stroke="var(--fg)"/>
+  <text x="545" y="125" text-anchor="middle" class="num" font-size="13">4.2</text>
+  <text x="545" y="155" text-anchor="middle" class="title" font-size="12.5">Apply Token</text>
+  <text x="545" y="172" text-anchor="middle" class="title" font-size="12.5">Budget</text>
+
+  <rect x="680" y="105" width="190" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="680" y1="133" x2="870" y2="133" stroke="var(--fg)"/>
+  <text x="775" y="125" text-anchor="middle" class="num" font-size="13">4.3</text>
+  <text x="775" y="155" text-anchor="middle" class="title" font-size="12.5">Assemble Context</text>
+  <text x="775" y="172" text-anchor="middle" class="title" font-size="12.5">Package</text>
+
+  <rect class="ref-box" x="950" y="40" width="190" height="60"/>
+  <text x="1045" y="65" text-anchor="middle" class="ref-text title" font-size="12.5">AI Agent / Caller</text>
+
+  <rect x="680" y="230" width="190" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="680" y1="258" x2="870" y2="258" stroke="var(--fg)"/>
+  <text x="775" y="250" text-anchor="middle" class="num" font-size="13">4.4</text>
+  <text x="775" y="280" text-anchor="middle" class="title" font-size="12.5">Emit Task</text>
+  <text x="775" y="297" text-anchor="middle" class="title" font-size="12.5">Metrics</text>
+
+  <rect class="ref-box" x="950" y="235" width="190" height="60"/>
+  <text x="1045" y="260" text-anchor="middle" class="ref-text title" font-size="12">6.0 Record &amp;</text>
+  <text x="1045" y="276" text-anchor="middle" class="ref-text title" font-size="12">Report Metrics</text>
+
+  <!-- flows -->
+  <line x1="190" y1="145" x2="238" y2="145" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="215" y="97" text-anchor="middle" class="flow" fill="var(--muted)">ranked evidence</text>
+
+  <line x1="410" y1="148" x2="458" y2="148" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="435" y="97" text-anchor="middle" class="flow" fill="var(--muted)">deduped</text>
+
+  <line x1="630" y1="148" x2="678" y2="148" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="655" y="97" text-anchor="middle" class="flow" fill="var(--muted)">budgeted</text>
+
+  <path d="M870,120 L948,90" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="940" y="76" text-anchor="end" class="flow" fill="var(--muted)">context package</text>
+
+  <line x1="775" y1="190" x2="775" y2="228" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="782" y="212" class="flow" fill="var(--muted)">package stats</text>
+
+  <line x1="870" y1="270" x2="948" y2="267" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="909" y="258" text-anchor="middle" class="flow" fill="var(--muted)">task metrics</text>
+</svg>
+      </div>
+      <figcaption>4.4 is a one-line side effect of 4.3, not a gate — the context
+        package reaches the agent the moment it's assembled, independent of whether
+        metrics recording succeeds.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ======================================================================= -->
+  <section id="p5">
+    <p class="proc-of">Decomposes process 5.0</p>
+    <h2>Manage Context Memory</h2>
+    <p class="sub">Three independent lanes, one per cache. 5.1 builds the two version-sensitive keys; session knowledge is looked up by tenant and session id and needs neither a resource nor a version.</p>
+    <figure>
+      <div class="diagram-scroll">
+<svg viewBox="0 125 1000 385" width="1000" height="385" role="img"
+     aria-label="Process 5.0 decomposed into Build Cache Keys, Manage Document Cache, Manage Evidence Cache and Manage Session Knowledge, each reading and writing its own compartment of the Context Memory Cache.">
+  <rect class="ref-box" x="20" y="150" width="190" height="60" rx="30"/>
+  <text x="115" y="176" text-anchor="middle" class="ref-text title" font-size="12">1.0 Ingest &amp;</text>
+  <text x="115" y="192" text-anchor="middle" class="ref-text title" font-size="12">Represent Source</text>
+  <rect class="ref-box" x="20" y="275" width="190" height="60" rx="30"/>
+  <text x="115" y="302" text-anchor="middle" class="ref-text title" font-size="12">3.0 Retrieve &amp;</text>
+  <text x="115" y="316" text-anchor="middle" class="ref-text title" font-size="12">Rank Evidence</text>
+  <rect class="ref-box" x="20" y="400" width="190" height="60"/>
+  <text x="115" y="434" text-anchor="middle" class="ref-text title" font-size="12.5">AI Agent / Caller</text>
+  <rect x="260" y="140" width="190" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="260" y1="170" x2="450" y2="170" stroke="var(--fg)"/>
+  <text x="355" y="162" text-anchor="middle" class="num" font-size="13">5.2</text>
+  <text x="355" y="192" text-anchor="middle" class="title" font-size="12.5">Manage Document</text>
+  <text x="355" y="209" text-anchor="middle" class="title" font-size="12.5">Cache</text>
+  <rect x="260" y="265" width="190" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="260" y1="295" x2="450" y2="295" stroke="var(--fg)"/>
+  <text x="355" y="287" text-anchor="middle" class="num" font-size="13">5.3</text>
+  <text x="355" y="317" text-anchor="middle" class="title" font-size="12.5">Manage Evidence</text>
+  <text x="355" y="334" text-anchor="middle" class="title" font-size="12.5">Cache</text>
+  <rect x="260" y="390" width="190" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="260" y1="420" x2="450" y2="420" stroke="var(--fg)"/>
+  <text x="355" y="412" text-anchor="middle" class="num" font-size="13">5.4</text>
+  <text x="355" y="442" text-anchor="middle" class="title" font-size="12.5">Manage Session</text>
+  <text x="355" y="459" text-anchor="middle" class="title" font-size="12.5">Knowledge</text>
+  <rect x="480" y="195" width="170" height="70" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="480" y1="225" x2="650" y2="225" stroke="var(--fg)"/>
+  <text x="565" y="217" text-anchor="middle" class="num" font-size="13">5.1</text>
+  <text x="565" y="247" text-anchor="middle" class="title" font-size="12">Build Cache Keys</text>
+  <path d="M960,140 L700,140 L700,475 L960,475" fill="none" stroke="currentColor"/>
+  <line x1="700" y1="245" x2="960" y2="245" stroke="var(--border)"/>
+  <line x1="700" y1="370" x2="960" y2="370" stroke="var(--border)"/>
+  <text x="714" y="165" class="title" font-size="12.5">Document cache</text>
+  <text x="714" y="184" class="flow" fill="var(--muted)">key: tenant + resource + versions</text>
+  <text x="714" y="200" class="flow" fill="var(--muted)">purged when a version is superseded</text>
+  <text x="714" y="270" class="title" font-size="12.5">Evidence cache</text>
+  <text x="714" y="289" class="flow" fill="var(--muted)">key: tenant + query + index version</text>
+  <text x="714" y="305" class="flow" fill="var(--muted)">validated on hit · TTL</text>
+  <text x="714" y="395" class="title" font-size="12.5">Session knowledge</text>
+  <text x="714" y="414" class="flow" fill="var(--muted)">key: tenant + session id</text>
+  <text x="700" y="495" class="num" font-size="12.5">D3</text>
+  <text x="730" y="495" class="title" font-size="12.5">Context Memory Cache</text>
+  <path d="M210,180 L258,180" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="20" y="143" class="flow" fill="var(--muted)">nodes + superseded version</text>
+  <path d="M210,305 L258,305" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="20" y="268" class="flow" fill="var(--muted)">evidence lookup / cached evidence</text>
+  <path d="M210,430 L258,430" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="20" y="393" class="flow" fill="var(--muted)">session get / put</text>
+  <path d="M450,170 L698,170" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="460" y="162" class="flow" fill="var(--muted)">write · read · purge: document cache</text>
+  <path d="M450,212 L478,212" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="464" y="232" text-anchor="middle" class="flow" fill="var(--muted)">key</text>
+  <path d="M450,282 L478,258" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="470" y="294" class="flow" fill="var(--muted)">key</text>
+  <path d="M450,320 L698,320" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="460" y="340" class="flow" fill="var(--muted)">read · write · evict: evidence cache</text>
+  <path d="M450,432 L698,432" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="460" y="425" class="flow" fill="var(--muted)">read · write: session (no cache key)</text>
+</svg>
+      </div>
+      <figcaption>The evidence key has no resource or version in it because 3.0 asks before it knows which resources are relevant; staleness is caught by validation in 3.6 instead, with a TTL as the backstop. Document-cache entries are purged as soon as 1.0 reports a superseded version.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ======================================================================= -->
+  <section id="p6">
+    <p class="proc-of">Decomposes process 6.0</p>
+    <h2>Record &amp; Report Metrics</h2>
+    <p class="sub">Writing and reading metrics are independent paths that only meet at the store; recording a task's metrics never waits on, or blocks, a dashboard query.</p>
+    <figure>
+      <div class="diagram-scroll">
+<svg viewBox="0 0 1180 330" width="1180" height="330" role="img"
+     aria-label="Process 6.0 decomposed into Validate and Normalize, Persist Metrics Record, Serve Metrics Query and Aggregate and Compare. 6.2 writes the Metrics Store; 6.4 reads it and asks 6.3 for comparisons.">
+  <rect class="ref-box" x="20" y="130" width="180" height="60" rx="30"/>
+  <text x="110" y="156" text-anchor="middle" class="ref-text title" font-size="12">4.0 Optimize &amp;</text>
+  <text x="110" y="172" text-anchor="middle" class="ref-text title" font-size="12">Deliver Context</text>
+  <rect x="240" y="120" width="180" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="240" y1="150" x2="420" y2="150" stroke="var(--fg)"/>
+  <text x="330" y="142" text-anchor="middle" class="num" font-size="13">6.1</text>
+  <text x="330" y="172" text-anchor="middle" class="title" font-size="12.5">Validate &amp;</text>
+  <text x="330" y="189" text-anchor="middle" class="title" font-size="12.5">Normalize</text>
+  <rect x="460" y="120" width="180" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="460" y1="150" x2="640" y2="150" stroke="var(--fg)"/>
+  <text x="550" y="142" text-anchor="middle" class="num" font-size="13">6.2</text>
+  <text x="550" y="172" text-anchor="middle" class="title" font-size="12.5">Persist Metrics</text>
+  <text x="550" y="189" text-anchor="middle" class="title" font-size="12.5">Record</text>
+  <line x1="460" y1="260" x2="820" y2="260" stroke="currentColor"/>
+  <line x1="460" y1="310" x2="820" y2="310" stroke="currentColor"/>
+  <text x="472" y="288" class="num" font-size="13">D4</text>
+  <text x="505" y="288" class="title" font-size="12.5">Metrics Store</text>
+  <text x="472" y="306" class="flow" fill="var(--muted)">task_metrics</text>
+  <rect x="700" y="30" width="180" height="85" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="700" y1="60" x2="880" y2="60" stroke="var(--fg)"/>
+  <text x="790" y="52" text-anchor="middle" class="num" font-size="13">6.4</text>
+  <text x="790" y="82" text-anchor="middle" class="title" font-size="12.5">Serve Metrics</text>
+  <text x="790" y="99" text-anchor="middle" class="title" font-size="12.5">Query</text>
+  <rect x="700" y="160" width="180" height="80" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="700" y1="190" x2="880" y2="190" stroke="var(--fg)"/>
+  <text x="790" y="182" text-anchor="middle" class="num" font-size="13">6.3</text>
+  <text x="790" y="212" text-anchor="middle" class="title" font-size="12.5">Aggregate &amp;</text>
+  <text x="790" y="229" text-anchor="middle" class="title" font-size="12.5">Compare</text>
+  <rect class="ref-box" x="950" y="30" width="200" height="85"/>
+  <text x="1050" y="69" text-anchor="middle" class="ref-text title" font-size="12">Metrics Consumer</text>
+  <text x="1050" y="84" text-anchor="middle" class="ref-text title" font-size="12">dashboards, benchmarks</text>
+  <path d="M200,160 L238,160" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="204" y="112" class="flow" fill="var(--muted)">task metrics</text>
+  <path d="M420,163 L458,163" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="440" y="112" text-anchor="middle" class="flow" fill="var(--muted)">validated</text>
+  <path d="M550,205 L550,258" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="558" y="238" class="flow" fill="var(--muted)">write: record</text>
+  <path d="M948,72 L882,72" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="915" y="22" text-anchor="middle" class="flow" fill="var(--muted)">query / result</text>
+  <path d="M822,285 L910,285 L910,95 L882,95" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="918" y="190" class="flow" fill="var(--muted)">read: records</text>
+  <path d="M770,115 L770,158" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="764" y="140" text-anchor="end" class="flow" fill="var(--muted)">recent records</text>
+  <path d="M810,158 L810,117" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="816" y="140" class="flow" fill="var(--muted)">comparison</text>
+</svg>
+      </div>
+      <figcaption>6.3's baseline vs. standard-RAG vs. advanced-RAG vs. ICRO comparison (the evaluation plan in system_specifications.md) is the logical design; <span style="color:var(--fg)">InMemoryEvaluationService</span> only implements 6.1, 6.2 and 6.4 so far.</figcaption>
+    </figure>
+
+    <div class="legend">
+      <span><svg class="lshape" viewBox="0 0 30 18"><rect x="1" y="1" width="28" height="16" rx="6" fill="none" stroke="currentColor"/></svg>process (decomposed here)</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><rect x="1" y="1" width="28" height="16" rx="6" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/></svg>boundary reference</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><line x1="1" y1="3" x2="29" y2="3" stroke="currentColor"/><line x1="1" y1="15" x2="29" y2="15" stroke="currentColor"/></svg>data store</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><line x1="1" y1="9" x2="24" y2="9" stroke="currentColor" marker-end="url(#arrow)"/></svg>data flow</span>
+      <span><svg class="lshape" viewBox="0 0 30 18"><line x1="1" y1="9" x2="24" y2="9" stroke="var(--accent)" stroke-dasharray="2 4" marker-end="url(#arrowAccent)"/></svg>reuse shortcut</span>
+    </div>
+  </section>
+</div>

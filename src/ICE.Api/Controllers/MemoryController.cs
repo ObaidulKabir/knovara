@@ -16,17 +16,24 @@ public sealed class MemoryController : ControllerBase
     }
 
     [HttpGet("sessions/{sessionId}")]
-    public async Task<ActionResult<SessionKnowledge>> GetSession(string sessionId, CancellationToken ct)
+    public async Task<ActionResult<SessionKnowledge>> GetSession(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string sessionId,
+        CancellationToken ct)
     {
-        var knowledge = await _memory.GetSessionKnowledgeAsync(sessionId, ct);
+        var knowledge = await _memory.GetSessionKnowledgeAsync(tenantId, sessionId, ct);
         return knowledge is null ? NotFound() : Ok(knowledge);
     }
 
     [HttpPut("sessions/{sessionId}")]
-    public async Task<IActionResult> SaveSession(string sessionId, [FromBody] SessionKnowledge knowledge, CancellationToken ct)
+    public async Task<IActionResult> SaveSession(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string sessionId,
+        [FromBody] SessionKnowledge knowledge,
+        CancellationToken ct)
     {
         if (sessionId != knowledge.SessionId) return BadRequest("sessionId mismatch");
-        await _memory.SaveSessionKnowledgeAsync(knowledge, ct);
+        await _memory.SaveSessionKnowledgeAsync(tenantId, knowledge, ct);
         return NoContent();
     }
 }

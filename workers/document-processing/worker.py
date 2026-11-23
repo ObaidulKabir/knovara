@@ -71,7 +71,7 @@ def handle_message(channel, method, properties, body: bytes) -> None:
         with httpx.Client(base_url=API_BASE_URL, timeout=30.0) as client:
             response = client.post(
                 f"/api/resources/{job.resource_id}/nodes",
-                params={"tenantId": job.tenant_id, "sourceVersion": "v1"},
+                headers={"X-Tenant-Id": job.tenant_id},
                 json=nodes,
             )
             response.raise_for_status()

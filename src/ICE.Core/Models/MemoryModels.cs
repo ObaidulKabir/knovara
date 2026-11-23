@@ -20,7 +20,19 @@ public record SessionKnowledge(
     IReadOnlyList<string> PreviouslyExamined,
     IReadOnlyList<string> UnresolvedQuestions);
 
-/// <summary>Cache key components so stale or cross-tenant evidence is never served.</summary>
+/// <summary>
+/// Evidence-cache key. Looked up before retrieval, when the question is not yet tied to any
+/// resource, so it cannot include a source version; hits are validated against current versions instead.
+/// </summary>
+public record EvidenceCacheKey(
+    string TenantId,
+    string QueryFingerprint,
+    string IndexVersion)
+{
+    public string ToKeyString() => $"{TenantId}:{IndexVersion}:{QueryFingerprint}";
+}
+
+/// <summary>Document-cache key: pins tenant, resource and every version the cached knowledge depends on.</summary>
 public record CacheKey(
     string ResourceId,
     string SourceVersion,

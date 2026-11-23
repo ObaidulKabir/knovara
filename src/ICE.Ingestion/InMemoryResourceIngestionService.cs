@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ICE.Core.Contracts;
 using ICE.Core.Models;
 
@@ -5,31 +6,48 @@ namespace ICE.Ingestion;
 
 /// <summary>
 /// Placeholder implementation: registers resources in memory and returns a single
-/// document-level node per resource. Replace with AST (Tree-sitter) / structural
-/// (Docling) extraction per source type — see system_architecture.md "Format-Aware Processing".
+/// document-level node per resource. Replace extraction with AST (Tree-sitter) /
+/// structural (Docling) processing per source type — see system_architecture.md
+/// "Format-Aware Processing".
 /// </summary>
 public sealed class InMemoryResourceIngestionService : IResourceIngestionService
 {
-    private readonly Dictionary<string, ResourceReference> _resources = new();
+    private readonly ConcurrentDictionary<string, ResourceReference> _byId = new();
+    private readonly ConcurrentDictionary<(string TenantId, string Uri), string> _idByTenantUri = new();
+    private readonly object _registrationLock = new();
 
-    public Task<ResourceReference> RegisterResourceAsync(string uri, SourceType type, string tenantId, CancellationToken ct = default)
+    public Task<ResourceRegistration> RegisterResourceAsync(string uri, SourceType type, string tenantId, string sourceVersion, CancellationToken ct = default)
     {
-        var resource = new ResourceReference(
-            ResourceId: Guid.NewGuid().ToString("n"),
-            Type: type,
-            Uri: uri,
-            SourceVersion: "v1",
-            TenantId: tenantId);
+        lock (_registrationLock)
+        {
+            if (_idByTenantUri.TryGetValue((tenantId, uri), out var existingId))
+            {
+                var existing = _byId[existingId];
+                if (existing.SourceVersion == sourceVersion)
+                {
+                    return Task.FromResult(new ResourceRegistration(existing, IsNewVersion: false, SupersededVersion: null));
+                }
 
-        _resources[resource.ResourceId] = resource;
-        return Task.FromResult(resource);
+                var updated = existing with { SourceVersion = sourceVersion };
+                _byId[existingId] = updated;
+                return Task.FromResult(new ResourceRegistration(updated, IsNewVersion: true, SupersededVersion: existing.SourceVersion));
+            }
+
+            var resource = new ResourceReference(
+                ResourceId: Guid.NewGuid().ToString("n"),
+                Type: type,
+                Uri: uri,
+                SourceVersion: sourceVersion,
+                TenantId: tenantId);
+
+            _byId[resource.ResourceId] = resource;
+            _idByTenantUri[(tenantId, uri)] = resource.ResourceId;
+            return Task.FromResult(new ResourceRegistration(resource, IsNewVersion: true, SupersededVersion: null));
+        }
     }
 
-    public Task<bool> HasChangedAsync(ResourceReference resource, CancellationToken ct = default)
-    {
-        var known = _resources.TryGetValue(resource.ResourceId, out var existing) ? existing : null;
-        return Task.FromResult(known is null || known.SourceVersion != resource.SourceVersion);
-    }
+    public Task<ResourceReference?> GetResourceAsync(string resourceId, CancellationToken ct = default)
+        => Task.FromResult(_byId.TryGetValue(resourceId, out var resource) ? resource : null);
 
     public Task<IReadOnlyList<KnowledgeNode>> IngestAsync(ResourceReference resource, CancellationToken ct = default)
     {

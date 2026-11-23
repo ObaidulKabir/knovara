@@ -28,14 +28,15 @@ This document specifies the **Intelligent Context Engine** (working name: **ICRO
 5. **Hybrid search and reranking**: combine index results via Reciprocal Rank Fusion; apply cross-encoder reranking selectively to candidate sets.
 6. **Progressive, query-planned retrieval**: coarse-to-fine retrieval with an evidence-sufficiency check and a bounded search budget, rather than a uniform pipeline for every question.
 7. **Context Memory & Reuse**: document knowledge cache, retrieval/evidence cache, and session knowledge memory, each independently queryable and reusable across agents/sessions.
-8. **Incremental indexing and invalidation**: reprocess only changed resources; invalidate only dependent cached evidence; cache keys carry source version, model/index version, tenant, and access permissions.
-9. **Evidence-grounded answers**: every answer must be traceable to, and verifiable against, the original source passage — summaries never stand in as the sole evidence for a factual claim.
+8. **Incremental indexing and invalidation**: a resource is registered once per (tenant, URI); re-ingestion stops at the version check when the content hash is unchanged; a new version emits a *version superseded* event that replaces that resource's index entries and purges its document-cache entries.
+9. **Evidence-grounded answers**: before evidence leaves retrieval, each cited passage is re-read from the Resource & Knowledge Store at its current version; evidence whose source has changed is dropped. Summaries never stand in as the sole evidence for a factual claim.
 10. **Agent-facing tools/APIs**: an agent should be able to locate, inspect, expand, compare, or verify evidence through API calls rather than downloading and reading an entire resource.
 
 ## Services & Responsibilities
 
 | Service | Purpose |
 |---|---|
+| Access Control | Authenticate callers; derive tenant from credential; enforce tenant filter on every read |
 | Resource Ingestion Service | Connectors, source synchronization, version detection, format-specific extraction |
 | Knowledge Representation Service | Document hierarchy, semantic units, summaries, entities, relationships |
 | Index Management Service | Vector, keyword, graph, and metadata indexing |
@@ -76,6 +77,18 @@ This document specifies the **Intelligent Context Engine** (working name: **ICRO
 | Session memory | What the agent has already investigated and what remains unresolved |
 | Prompt cache (model-side) | Computation reuse for an identical, reusable prompt prefix — complementary, not a substitute for the above |
 
+### Cache keys
+
+| Cache | Key | Validation on hit |
+|---|---|---|
+| Document cache | tenant + resource + source version + index version + model version | None needed — the key already pins the version |
+| Evidence cache | tenant + normalized query fingerprint + index version | Every cited item's source version must equal the current version in the Resource & Knowledge Store, or the hit is a miss |
+| Session knowledge | tenant + session id | Session must belong to the caller's tenant |
+
+The evidence cache cannot use a resource-version key: it is consulted before retrieval, when the question has not yet been matched to any resource. Evidence-cache entries also carry a TTL so entries orphaned by new source versions are bounded.
+
+The document cache is a disposable hot copy of the Resource & Knowledge Store, never the other way round.
+
 ## Non-Functional Requirements / Design Constraints
 
 - **Source fidelity**: the original source is always recoverable; derived representations (summaries, embeddings, graph edges) never replace it as evidence.
@@ -83,7 +96,8 @@ This document specifies the **Intelligent Context Engine** (working name: **ICRO
 - **Graph usage**: explicit relationships in relational storage first; a dedicated graph database is introduced only once complexity/reuse justifies the cost.
 - **Cost-aware indexing**: three investment levels (Basic / Enhanced / Advanced) so processing cost scales with resource usage/frequency, not applied uniformly.
 - **Provider neutrality**: embedding, reranking, and summarization models are swappable via adapters; model/embedding versions are tracked so incompatible indexes are never silently mixed.
-- **Multi-tenancy & security**: cache and index entries carry tenant and access-permission metadata to prevent cross-tenant or unauthorized evidence leakage.
+- **Multi-tenancy & security**: the tenant is derived from the caller's authenticated credential, never from a request body; every index search, store read and cache lookup is filtered by it.
+- **External model providers**: the summarization LLM, embedding model and reranker are external dependencies reached through adapters; each call's tokens, latency and cost are recorded.
 - **Modularity over day-one completeness**: start on PostgreSQL (metadata + hierarchy + full-text + vector); add OpenSearch/Neo4j/dedicated vector DB only when scale/benchmarks justify it.
 
 ## Delivery Roadmap

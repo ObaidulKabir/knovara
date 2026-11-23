@@ -29,13 +29,13 @@ infra/
 ```
 
 Each service project maps 1:1 to a row in system_architecture.md's "Core Components" table.
-`ICE.Api` composes them behind three endpoint groups:
+`ICE.Api` exposes these endpoints. Every request must carry an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads are filtered by it.
 
-- `POST /api/resources/ingest` — register + ingest + index a resource synchronously (small/code sources).
-- `POST /api/resources/{resourceId}/nodes` — accept structure extracted out-of-process by the Python worker.
-- `POST /api/retrieval/ask` — progressive retrieval + context optimization for a question; returns a `ContextPackage`, not a raw document dump.
-- `GET/PUT /api/memory/sessions/{sessionId}` — session knowledge memory.
-- `GET /api/evaluation/recent` — recent per-task metrics.
+- `POST /api/resources/ingest` — `{ uri, type, contentHash }`. Registers the resource once per (tenant, uri). If `contentHash` matches the recorded version it returns immediately without re-ingesting; a new hash supersedes the old version (index entries replaced, document cache purged).
+- `POST /api/resources/{resourceId}/nodes` — accept structure extracted out-of-process by the Python worker, for an already-registered resource in the caller's tenant (404 otherwise).
+- `POST /api/retrieval/ask` — evidence cache (keyed by tenant + normalized question + index version) → on a miss, progressive retrieval → evidence whose source version is no longer current is dropped → context optimization. Returns a `ContextPackage`.
+- `GET/PUT /api/memory/sessions/{sessionId}` — session knowledge memory, scoped to the tenant.
+- `GET /api/evaluation/recent` — recent per-task metrics, including whether the evidence cache was hit.
 
 ## Run locally (no Docker)
 
@@ -56,8 +56,10 @@ This brings up Postgres (with the `pgvector` extension and Phase 1 schema), Redi
 
 ## Next steps (to move past the scaffold)
 
+0. **Authentication.** The tenant currently comes from a header the caller sets, which is only safe behind a trusted gateway. Add authentication middleware that derives the tenant from the verified credential and sets it where controllers read `TenantHeader`, then reject the raw header from untrusted callers.
 1. Replace `InMemoryIndexManagementService` with a Postgres-backed implementation (pgvector for semantic, full-text search for lexical, `relationship_edges` for graph) using the schema in `infra/postgres/init.sql`.
 2. Replace `InMemoryContextMemoryService` with a Redis-backed implementation (`StackExchange.Redis` is the natural fit) so memory survives restarts and is shared across API instances.
 3. Wire `ICE.Ingestion` to actually call Tree-sitter (code) and have the Python worker call Docling (documents) instead of returning a single placeholder node.
 4. Implement real hybrid search (Reciprocal Rank Fusion) and reranking in `ICE.Retrieval` instead of the single lexical pass in `ProgressiveRetrievalService`.
-5. Add the asynchronous publish side: `ICE.Api` should publish an ingestion job to RabbitMQ for document/website sources instead of (or in addition to) the synchronous `/ingest` path, so the worker in `workers/document-processing` has something to consume.
+5. Compute `contentHash` server-side (or in the worker) from the fetched source instead of trusting the caller's value, and make Step 6 "verify against original passages" read `original_content` from Postgres rather than only checking the version.
+6. Add the asynchronous publish side: `ICE.Api` should publish an ingestion job to RabbitMQ for document/website sources instead of (or in addition to) the synchronous `/ingest` path, so the worker in `workers/document-processing` has something to consume.

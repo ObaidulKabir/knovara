@@ -33,16 +33,41 @@ The original source is always the source of truth. Every derived artifact (summa
 
 Running alongside this pipeline: a **Context Memory & Reuse Engine** that persists previously retrieved evidence, verified findings, source versions, and reusable intermediate results.
 
+## Two Paths, Two Kinds of Savings
+
+The pipeline above is really two paths that run at different times. A question never passes through stages 1–4.
+
+| Path | Runs | Stages | Where the saving comes from |
+|---|---|---|---|
+| **Ingest path** | Once per source *version* | 1 → 4 | Stage 1 compares the source's content hash with the last recorded version and stops immediately if nothing changed — no parsing, summarizing or embedding is repeated. |
+| **Query path** | Once per *question* | Agent → 5 → 6 → 7 | Stage 5 checks the evidence cache before searching any index; a valid hit skips coarse, targeted and expansion search entirely. |
+
+The ingest path makes knowledge cheap to keep; the query path makes repeat questions cheap to answer. They are measured separately (reprocessing rate vs. cache hit rate).
+
+## External Dependencies
+
+Model providers are outside the system boundary and are reached only through provider-neutral adapters:
+
+| Provider | Used by | Purpose |
+|---|---|---|
+| Summarization LLM | Knowledge Representation | Section/chapter/document summaries |
+| Embedding model | Index Management | Semantic (vector) index |
+| Reranker (cross-encoder) | Intelligent Retrieval | Reranking the candidate set |
+
+Every call is metered (tokens, latency, cost) by the Evaluation & Observability Service, since these calls are the main cost the system exists to reduce.
+
 ## Core Components
 
 | Component | Description |
 |-----------|-------------|
-| **Resource Ingestion Service** | Connectors for codebases, documents, and web sources; detects source versions (hash/timestamp/HTTP validators) and triggers re-ingestion only for changed material. |
+| **Access Control** | Authenticates every caller and derives the tenant from the credential (never from the request body); every store read and cache lookup is filtered by that tenant. |
+| **Resource Ingestion Service** | Connectors for codebases, documents, and web sources; registers each resource once per (tenant, URI), detects source versions (hash/timestamp/HTTP validators) and triggers re-ingestion only for changed material. |
 | **Knowledge Representation Service** | Builds document hierarchy, semantic units, multi-level summaries, entities, and relationships from parsed structure. |
 | **Index Management Service** | Maintains the four index types (vector, keyword, graph, metadata) and keeps them in sync with the knowledge representation. |
 | **Intelligent Retrieval Service** | Plans queries, executes multi-index retrieval, reranks candidates, and progressively expands context only as needed. |
 | **Context Optimization Service** | Deduplicates evidence, applies token budgeting, selects the minimum sufficient evidence set, and assembles the final context package. |
-| **Context Memory Service** | Owns the document knowledge cache, retrieval/evidence cache, and session knowledge memory; enforces cache invalidation tied to source version. |
+| **Context Memory Service** | Owns the document knowledge cache, retrieval/evidence cache, and session knowledge memory; purges entries for superseded source versions. |
+| **Model Provider Adapters** | Provider-neutral wrappers for the summarization LLM, embedding model and reranker; record model version and per-call cost. |
 | **Evaluation & Observability Service** | Tracks tokens, latency, LLM call count, recall, accuracy, citation correctness, and cache hit/reprocessing rates. |
 
 ## Format-Aware Processing
@@ -90,22 +115,47 @@ Operates at three levels, distinct from model-side prompt caching:
 | **Retrieval & evidence cache** | Which passages were retrieved for a given query, and the relationships discovered among them, so a related follow-up question reuses prior evidence instead of re-searching from scratch. |
 | **Session knowledge memory** | A structured, per-task record of claims, their source, and verification status, plus what has already been examined and what remains unresolved — a reusable knowledge state for the current task. |
 
-Cache keys include source version, index/model version, tenant, and access permissions, so an agent can never receive stale or unauthorized evidence.
+### Cache keys
+
+The two version-sensitive caches need different keys, because a question is not tied to any resource until retrieval has run:
+
+| Cache | Key | Why |
+|---|---|---|
+| Document knowledge cache | `tenant + resource + source version + index version + model version` | Built after ingestion, when the resource and its version are known. |
+| Evidence cache | `tenant + normalized query fingerprint + index version` | Looked up *before* retrieval, when only the question is known. |
+| Session knowledge | `tenant + session id` | Not version-scoped; it records what a task has learned. |
+
+An evidence-cache hit is **validated before use**: each cached evidence item carries the source version it was read from, and retrieval compares it with the current version in the Resource & Knowledge Store. If any cited source has a newer version, the hit is treated as a miss.
+
+### Relationship to the Resource & Knowledge Store
+
+The Resource & Knowledge Store (Postgres) is the durable record of every resource's hierarchy, summaries and original passages. The document knowledge cache (Redis) is a hot, disposable copy of the most-used parts of it. The cache can always be rebuilt from the store; the store is never rebuilt from the cache.
+
+### Invalidation
+
+When the Resource Ingestion Service records a new version of a resource, it emits a **version superseded** event carrying the old version. The Index Management Service replaces that resource's index entries, and the Context Memory Service purges document-cache entries keyed by the old version. Evidence-cache entries that cite the old version are not searched for; they fail validation on their next hit and are evicted then, with a TTL as the backstop against unbounded growth.
 
 ## Progressive / Intelligent Retrieval
 
 Retrieval is query-planned, not uniform:
 
 ```
-User question
+User question (authenticated; tenant from credential)
+  → Step 0: Evidence cache lookup (tenant + query fingerprint + index version)
+       valid hit → go to Step 5
   → Step 1: Query understanding (subject, answer type, likely sources)
   → Step 2: Coarse retrieval (summaries, topic maps, relevant symbols)
   → Step 3: Targeted retrieval (specific passages/logic/config)
   → Step 4: Context expansion (neighbors, callers, docs) — only if evidence requires it
   → Step 5: Evidence sufficiency check
-       sufficient  → construct answer with source references
-       insufficient → retrieve missing evidence under a bounded search budget
+       sufficient  → Step 6
+       insufficient → Step 4 again, under a bounded search budget
+  → Step 6: Verify against original passages
+       read each cited passage's original text and current version from the
+       Resource & Knowledge Store; drop evidence that no longer matches
 ```
+
+Step 6 is what makes the design principle enforceable: summaries help find evidence, but what reaches the agent is always the original passage, at its current version.
 
 Retrieval depth and token budget scale with task type: a factual lookup may need one passage; a code-impact analysis may need multi-file dependency traversal; a whole-book analysis may need chapter-level evidence.
 
@@ -135,7 +185,7 @@ Retrieval depth and token budget scale with task type: a factual lookup may need
 | Advanced hybrid search | OpenSearch (when scale justifies) |
 | Knowledge relationships | PostgreSQL graph tables (initial), Neo4j (when justified) |
 | Cache | Redis |
-| Original resource storage | S3-compatible object storage |
+| Original resource storage | `knowledge_nodes.original_content` in Postgres (initial); S3-compatible object storage once sources outgrow it |
 | Asynchronous processing | RabbitMQ or Kafka |
 | Embedding models | Provider-neutral embedding adapter |
 | Reranking | Cross-encoder reranker |
@@ -151,6 +201,7 @@ Guiding rule: do not deploy every component on day one. PostgreSQL alone (metada
 3. Do not build a large knowledge graph immediately — start with explicit relationships in relational storage; graphs are valuable but costly to construct/maintain.
 4. Track indexing cost against resource usage — use the Basic/Enhanced/Advanced levels to avoid over-investing in rarely used material.
 5. Keep model/embedding/reranking providers swappable, but version them explicitly so incompatible indexes are never silently mixed.
+6. Never trust a tenant id supplied in a request body — derive it from the authenticated credential and filter every read by it.
 
 ---
 *System architecture drafted from the project brainstorming session (chat history.docx) on 2026-11-23.*
