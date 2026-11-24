@@ -37,6 +37,13 @@ namespace Knovara.Api.Tests
             _mockRetrieval.Setup(r => r.RetrieveAsync(It.IsAny<RetrievalQuery>(), It.IsAny<CancellationToken>()))
                           .ReturnsAsync(new RetrievalResult("q-1", new List<EvidenceItem>(), false, null));
 
+            // Mirrors ProgressiveRetrievalService.ExpandAsync, which hands the prior result back.
+            // Without this an unstubbed Moq call returns null, and because the result above reports
+            // EvidenceSufficient: false the controller always expands - so Ask threw a
+            // NullReferenceException before reaching any assertion.
+            _mockRetrieval.Setup(r => r.ExpandAsync(It.IsAny<RetrievalQuery>(), It.IsAny<RetrievalResult>(), It.IsAny<CancellationToken>()))
+                          .ReturnsAsync((RetrievalQuery _, RetrievalResult prior, CancellationToken _) => prior);
+
             return new RetrievalController(
                 _mockRetrieval.Object,
                 _optimization,

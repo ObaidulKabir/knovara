@@ -25,7 +25,11 @@ public sealed class TokenBudgetContextOptimizationService : IContextOptimization
         foreach (var item in deduped.OrderByDescending(e => e.RelevanceScore))
         {
             var estimatedTokens = item.Content.Length / CharsPerTokenEstimate;
-            if (runningTokens + estimatedTokens > tokenBudget) break;
+
+            // Skip, never stop: the list is relevance-ordered, so stopping at the first item that
+            // does not fit also discarded every smaller one behind it. One oversized passage — a
+            // pinned user document, say — then emptied the whole package.
+            if (runningTokens + estimatedTokens > tokenBudget) continue;
 
             selected.Add(item);
             runningTokens += estimatedTokens;
