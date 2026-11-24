@@ -54,6 +54,12 @@ public record RetrievalResult(
     string? FollowUpSearchHint,
     bool Reranked = false);
 
+/// <summary>A document or passage explicitly added or pinned to context by a user or agent.</summary>
+public record ContextDocument(
+    string Title,
+    string Content,
+    string? Source = null);
+
 /// <summary>The minimum sufficient, deduplicated evidence package handed to the LLM.</summary>
 public record ContextPackage(
     string QueryId,

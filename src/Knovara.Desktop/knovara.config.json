@@ -1,0 +1,7 @@
+{
+  "BaseUrl": "http://localhost:5299",
+  "TenantId": "default-tenant",
+  "UseMcp": false,
+  "McpPort": 50052,
+  "JwtToken": ""
+}

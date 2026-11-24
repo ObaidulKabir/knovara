@@ -36,4 +36,43 @@ public sealed class MemoryController : ControllerBase
         await _memory.SaveSessionKnowledgeAsync(tenantId, knowledge, ct);
         return NoContent();
     }
+
+    [HttpPost("sessions/{sessionId}/documents")]
+    public async Task<ActionResult<SessionKnowledge>> AddDocument(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string sessionId,
+        [FromBody] ContextDocument doc,
+        CancellationToken ct)
+    {
+        var existing = await _memory.GetSessionKnowledgeAsync(tenantId, sessionId, ct)
+            ?? new SessionKnowledge(sessionId, "session-root", [], [], []);
+
+        var title = string.IsNullOrWhiteSpace(doc.Title) ? "Added Document" : doc.Title;
+        var facts = new List<Fact>(existing.Facts)
+        {
+            new Fact(
+                Claim: $"{title}: {doc.Content}",
+                Source: doc.Source ?? "direct-context-doc",
+                Status: FactStatus.Verified)
+        };
+
+        var updated = existing with { Facts = facts };
+        await _memory.SaveSessionKnowledgeAsync(tenantId, updated, ct);
+        return Ok(updated);
+    }
+
+    [HttpDelete("sessions/{sessionId}/documents")]
+    public async Task<IActionResult> ClearDocuments(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string sessionId,
+        CancellationToken ct)
+    {
+        var existing = await _memory.GetSessionKnowledgeAsync(tenantId, sessionId, ct);
+        if (existing is not null)
+        {
+            var updated = existing with { Facts = [] };
+            await _memory.SaveSessionKnowledgeAsync(tenantId, updated, ct);
+        }
+        return NoContent();
+    }
 }

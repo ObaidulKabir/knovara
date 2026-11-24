@@ -7,7 +7,12 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Knovara.Api.Controllers;
 
-public record AskRequest(string SessionId, string Question, int TokenBudget = 2000);
+public record AskRequest(
+    string SessionId,
+    string Question,
+    int TokenBudget = 2000,
+    IReadOnlyList<string>? ResourceIds = null,
+    IReadOnlyList<ContextDocument>? Documents = null);
 public record SearchRequest(string Question, RetrievalMode Mode = RetrievalMode.Adaptive, int TopK = 5);
 
 [ApiController]
@@ -72,6 +77,51 @@ public sealed partial class RetrievalController : ControllerBase
             {
                 await _memory.SetCachedEvidenceAsync(cacheKey, result, ct);
             }
+        }
+
+        // Incorporate explicitly added context documents & session knowledge
+        var pinnedEvidence = new List<EvidenceItem>();
+
+        if (request.Documents is { Count: > 0 })
+        {
+            foreach (var doc in request.Documents)
+            {
+                if (string.IsNullOrWhiteSpace(doc.Content)) continue;
+                pinnedEvidence.Add(new EvidenceItem(
+                    NodeId: $"user-doc-{Guid.NewGuid():n}",
+                    ResourceId: doc.Source ?? "direct-context-doc",
+                    Title: string.IsNullOrWhiteSpace(doc.Title) ? "Added Document" : doc.Title,
+                    Content: doc.Content,
+                    SourceVersion: "current",
+                    RetrievedVia: IndexKind.Structural,
+                    RelevanceScore: 1.0));
+            }
+        }
+
+        var session = await _memory.GetSessionKnowledgeAsync(tenantId, request.SessionId, ct);
+        if (session?.Facts is { Count: > 0 })
+        {
+            foreach (var fact in session.Facts)
+            {
+                pinnedEvidence.Add(new EvidenceItem(
+                    NodeId: $"session-fact-{Guid.NewGuid():n}",
+                    ResourceId: fact.Source,
+                    Title: "Session Knowledge",
+                    Content: fact.Claim,
+                    SourceVersion: "current",
+                    RetrievedVia: IndexKind.Structural,
+                    RelevanceScore: 1.0));
+            }
+        }
+
+        if (pinnedEvidence.Count > 0)
+        {
+            var combined = new List<EvidenceItem>(pinnedEvidence);
+            if (result?.Evidence != null)
+            {
+                combined.AddRange(result.Evidence);
+            }
+            result = (result ?? new RetrievalResult(query.QueryId, [], false, null)) with { Evidence = combined };
         }
 
         var contextPackage = await _optimization.BuildContextAsync(result!, request.TokenBudget, ct);

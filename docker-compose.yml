@@ -1,0 +1,51 @@
+version: '3.8'
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_USER: knovara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: knovara
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  model-service:
+    build:
+      context: ./services/model-service
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_THREADS=2
+
+  api:
+    build:
+      context: ./src/Knovara.Api
+    ports:
+      - "5299:5299"
+    depends_on:
+      - postgres
+      - rabbitmq
+      - redis
+      - model-service
+    environment:
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=knovara;Username=knovara;Password=${POSTGRES_PASSWORD:-password}
+      - RabbitMq__Host=rabbitmq
+      - ModelService__BaseUrl=http://model-service:8000
+      - Jwt__Secret=${JWT_SECRET:-super-secret-key}
+    command: ["dotnet", "run", "--project", "Knovara.Api.csproj"]
+
+volumes:
+  pgdata:
