@@ -56,6 +56,16 @@ CREATE TABLE IF NOT EXISTS relationship_edges (
     PRIMARY KEY (from_node_id, to_node_id, relation_type)
 );
 
+-- Original bytes of documents uploaded through POST /api/resources/upload (URI upload://{fileName}).
+-- The worker fetches them back from the API, so no shared volume is needed. Cascades with the resource.
+CREATE TABLE IF NOT EXISTS resource_uploads (
+    resource_id  TEXT PRIMARY KEY REFERENCES resources(resource_id) ON DELETE CASCADE,
+    file_name    TEXT NOT NULL,
+    content      BYTEA NOT NULL,
+    size_bytes   BIGINT NOT NULL,
+    uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS task_metrics (
     task_id         TEXT PRIMARY KEY,
     input_tokens    INTEGER NOT NULL,

@@ -26,14 +26,35 @@ public interface IKnowledgeStore
 
     Task<ResourceReference?> GetResourceAsync(string tenantId, string resourceId, CancellationToken ct = default);
 
-    /// <summary>Every resource registered for the tenant, most recently updated first. The document-management panel's source of truth.</summary>
-    Task<IReadOnlyList<ResourceReference>> ListResourcesAsync(string tenantId, CancellationToken ct = default);
+    /// <summary>The tenant's resources matching <paramref name="filter"/>, most recently updated first, one page at a time.</summary>
+    Task<ResourcePage> QueryResourcesAsync(string tenantId, ResourceFilter filter, CancellationToken ct = default);
+
+    /// <summary>Counts of what the tenant has stored, by status and type, plus passage/embedding/byte totals.</summary>
+    Task<ResourceStats> GetStatsAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>The extracted passages of the resource's current version, in reading order. Null if the resource does not exist for this tenant.</summary>
+    Task<PassagePage?> ListPassagesAsync(string tenantId, string resourceId, int limit, int offset, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes the resource and its entire knowledge hierarchy (knowledge_nodes and relationship_edges
     /// cascade from the FK in init.sql). Returns false if it did not exist for this tenant.
     /// </summary>
     Task<bool> DeleteResourceAsync(string tenantId, string resourceId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes several resources in one statement, selected by explicit ids and/or by status, and returns the ids
+    /// actually deleted. At least one selector is required, so this can never mean "everything" by accident.
+    /// </summary>
+    Task<IReadOnlyList<string>> DeleteResourcesAsync(
+        string tenantId, IReadOnlyCollection<string>? resourceIds, ResourceStatus? status, CancellationToken ct = default);
+
+    /// <summary>
+    /// Registers (or re-registers) a document by file name and stores its bytes, so the worker can fetch them from the API.
+    /// Uploading the same name again replaces the content and marks the resource pending for re-processing.
+    /// </summary>
+    Task<ResourceReference> SaveUploadAsync(string tenantId, string fileName, byte[] content, CancellationToken ct = default);
+
+    Task<StoredUpload?> GetUploadAsync(string tenantId, string resourceId, CancellationToken ct = default);
 
     /// <summary>
     /// Compares a freshly computed content hash with the stored version. The resource counts as unchanged

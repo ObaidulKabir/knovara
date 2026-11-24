@@ -235,7 +235,6 @@
                                 <ComboBox x:Name="IngestTypeCombo" Height="28" SelectedIndex="0">
                                     <ComboBoxItem Content="Document"/>
                                     <ComboBoxItem Content="Website"/>
-                                    <ComboBoxItem Content="Code"/>
                                 </ComboBox>
                             </StackPanel>
                         </Grid>
@@ -243,6 +242,9 @@
                         <StackPanel Orientation="Horizontal">
                             <Button Content="Queue Ingestion" Click="OnIngestClicked" Height="32" Width="150"
                                     Background="#10B981" Foreground="White" FontWeight="SemiBold" Cursor="Hand" Margin="0,0,10,0"/>
+                            <Button Content="📤 Upload File..." Click="OnUploadFileClicked" Height="32" Width="150" Margin="0,0,10,0"
+                                    ToolTip="Sends a local file (pdf, docx, pptx, html, md, txt) to Knovara and queues it. Use this instead of typing a local path - the worker cannot read your disk."
+                                    Background="#0EA5E9" Foreground="White" FontWeight="SemiBold" Cursor="Hand"/>
                             <Button Content="📌 Also Pin to Ask Context" Click="OnPinIngestedToContextClicked" Height="32" Width="190"
                                     Background="#6366F1" Foreground="White" FontWeight="SemiBold" Cursor="Hand"/>
                         </StackPanel>
@@ -274,13 +276,20 @@
                             <TextBlock Text="📁 Documents for this tenant:" FontWeight="Bold" Foreground="#1E293B" FontSize="13"/>
                             <TextBlock x:Name="DocumentsSummaryText" Text=" loading..." Foreground="#64748B" FontSize="12" Margin="5,1,0,0"/>
                         </StackPanel>
-                        <Button Grid.Column="1" Content="🔄 Refresh" Click="OnRefreshDocumentsClicked"
-                                ToolTip="Reload the list from the API - only the documents registered for the current tenant."
-                                Padding="10,4" Background="#E2E8F0" Foreground="#1E293B" BorderBrush="#CBD5E1" Cursor="Hand"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Button x:Name="DeleteFailedButton" Content="🧹 Delete Failed" Click="OnDeleteFailedClicked" Margin="0,0,6,0" IsEnabled="False"
+                                    ToolTip="Deletes every document whose processing failed. Asks first; cannot be undone."
+                                    Padding="10,4" Background="#FEE2E2" Foreground="#991B1B" BorderBrush="#FECACA" Cursor="Hand"/>
+                            <Button Content="🔄 Refresh" Click="OnRefreshDocumentsClicked"
+                                    ToolTip="Reload the list from the API - only the documents registered for the current tenant."
+                                    Padding="10,4" Background="#E2E8F0" Foreground="#1E293B" BorderBrush="#CBD5E1" Cursor="Hand"/>
+                        </StackPanel>
                     </Grid>
 
                     <Border Grid.Row="1" Background="#F8FAFC" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="10">
                         <ListBox x:Name="DocumentsListBox" BorderThickness="0" Background="Transparent"
+                                 HorizontalContentAlignment="Stretch"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
@@ -292,12 +301,17 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Text="{Binding DisplayText}" FontSize="13" Foreground="#1E293B" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding ErrorText}" FontSize="11" Foreground="#B91C1C" TextWrapping="Wrap" Margin="0,2,0,0" MaxHeight="48"/>
                                                 <TextBlock Text="{Binding ResourceId}" FontSize="10" Foreground="#94A3B8" FontFamily="Consolas" Margin="0,2,0,0"/>
                                             </StackPanel>
-                                            <Button Grid.Column="1" Content="🗑 Delete" Click="OnDeleteDocumentClicked" Tag="{Binding ResourceId}"
-                                                    ToolTip="Deletes this document and everything extracted from it. Cannot be undone."
-                                                    Background="#FEE2E2" Foreground="#991B1B" BorderBrush="#FECACA" Padding="8,3" Cursor="Hand" FontSize="11"
-                                                    VerticalAlignment="Center"/>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button Content="↻ Re-ingest" Click="OnReingestDocumentClicked" Tag="{Binding ResourceId}"
+                                                        ToolTip="Queue this document for processing again (e.g. to retry a failure or refresh a web page)."
+                                                        Background="#E2E8F0" Foreground="#1E293B" BorderBrush="#CBD5E1" Padding="8,3" Margin="0,0,6,0" Cursor="Hand" FontSize="11"/>
+                                                <Button Content="🗑 Delete" Click="OnDeleteDocumentClicked" Tag="{Binding ResourceId}"
+                                                        ToolTip="Deletes this document and everything extracted from it. Cannot be undone."
+                                                        Background="#FEE2E2" Foreground="#991B1B" BorderBrush="#FECACA" Padding="8,3" Cursor="Hand" FontSize="11"/>
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>

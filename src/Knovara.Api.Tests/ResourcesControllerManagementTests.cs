@@ -18,6 +18,13 @@ public class ResourcesControllerManagementTests
     private ResourcesController CreateController() =>
         new(_mockStore.Object, _mockQueue.Object, _mockKnowledge.Object, _mockMemory.Object, _mockModels.Object);
 
+    private ResourcesController CreateControllerWithHttpContext()
+    {
+        var controller = CreateController();
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+        return controller;
+    }
+
     [Fact]
     public async Task List_ReturnsOnlyWhatTheStoreGivesForThisTenant()
     {
@@ -26,25 +33,26 @@ public class ResourcesControllerManagementTests
             new("r1", SourceType.Document, "samples/a.md", "sha256:aaa", "acme", ResourceStatus.Ready),
             new("r2", SourceType.Website, "https://example.com", null, "acme", ResourceStatus.Pending)
         };
-        _mockStore.Setup(s => s.ListResourcesAsync("acme", It.IsAny<CancellationToken>())).ReturnsAsync(resources);
+        _mockStore.Setup(s => s.QueryResourcesAsync("acme", It.IsAny<ResourceFilter>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync(new ResourcePage(resources, 2));
 
-        var result = await CreateController().List("acme", CancellationToken.None);
+        var result = await CreateControllerWithHttpContext().List("acme", null, null, null, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var returned = Assert.IsAssignableFrom<IReadOnlyList<ResourceReference>>(ok.Value);
         Assert.Equal(2, returned.Count);
-        _mockStore.Verify(s => s.ListResourcesAsync("acme", It.IsAny<CancellationToken>()), Times.Once);
+        _mockStore.Verify(s => s.QueryResourcesAsync("acme", It.IsAny<ResourceFilter>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task List_PassesTheCallersTenant_NeverAnotherOne()
     {
-        _mockStore.Setup(s => s.ListResourcesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                  .ReturnsAsync(new List<ResourceReference>());
+        _mockStore.Setup(s => s.QueryResourcesAsync(It.IsAny<string>(), It.IsAny<ResourceFilter>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync(new ResourcePage([], 0));
 
-        await CreateController().List("tenant-from-header", CancellationToken.None);
+        await CreateControllerWithHttpContext().List("tenant-from-header", null, null, null, CancellationToken.None);
 
-        _mockStore.Verify(s => s.ListResourcesAsync("tenant-from-header", It.IsAny<CancellationToken>()), Times.Once);
+        _mockStore.Verify(s => s.QueryResourcesAsync("tenant-from-header", It.IsAny<ResourceFilter>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

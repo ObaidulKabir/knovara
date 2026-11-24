@@ -54,6 +54,8 @@ namespace Knovara.Desktop
         public string Type { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public string? SourceVersion { get; set; }
+        public string? Error { get; set; }
+        public string ErrorText => string.IsNullOrWhiteSpace(Error) ? string.Empty : "⚠ " + Error;
         public string DisplayText => $"{Uri}   [{Type}] - {Status}{(SourceVersion is null ? "" : $"  (v:{SourceVersion[..Math.Min(19, SourceVersion.Length)]}…)")}";
     }
 
@@ -400,16 +402,23 @@ namespace Knovara.Desktop
             SetBusy("Loading documents for this tenant...");
             try
             {
-                var response = await _http.GetAsync("api/resources");
+                var response = await _http.GetAsync($"api/resources?limit={ListPageSize}");
                 var content = await response.Content.ReadAsStringAsync();
 
                 if (response.IsSuccessStatusCode)
                 {
                     var items = JsonSerializer.Deserialize<List<ManagedResourceItem>>(content, JsonOptions) ?? [];
+                    var total = response.Headers.TryGetValues("X-Total-Count", out var v) && int.TryParse(v.FirstOrDefault(), out var t) ? t : items.Count;
                     _managedResources.Clear();
                     foreach (var item in items) _managedResources.Add(item);
-                    DocumentsSummaryText.Text = $" {_managedResources.Count} document(s) for tenant '{_tenantId}'";
-                    SetStatus($"Loaded {_managedResources.Count} document(s).");
+
+                    var summary = total > items.Count
+                        ? $" showing {items.Count} of {total} document(s) for tenant '{_tenantId}' (most recent first)"
+                        : $" {total} document(s) for tenant '{_tenantId}'";
+                    summary += await StatsSuffixAsync();
+                    DocumentsSummaryText.Text = summary;
+                    DeleteFailedButton.IsEnabled = _managedResources.Any(m => m.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase));
+                    SetStatus($"Loaded {items.Count} document(s).");
                 }
                 else
                 {
@@ -421,6 +430,75 @@ namespace Knovara.Desktop
             {
                 DocumentsSummaryText.Text = $" Could not reach API: {ex.Message}";
                 SetStatus($"Document list failed: {ex.Message}");
+            }
+        }
+
+        private const int ListPageSize = 500;
+
+        /// <summary>The volume at a glance, from GET api/resources/stats. Optional: the list is useful without it.</summary>
+        private async Task<string> StatsSuffixAsync()
+        {
+            try
+            {
+                var json = await _http.GetStringAsync("api/resources/stats");
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                var failed = root.GetProperty("byStatus").TryGetProperty("Failed", out var f) ? f.GetInt32() : 0;
+                return $" · {root.GetProperty("passages").GetInt32():N0} passages" + (failed > 0 ? $" · {failed} failed" : "");
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private async void OnReingestDocumentClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn || btn.Tag is not string resourceId) return;
+
+            SetBusy($"Re-queuing {resourceId}...");
+            try
+            {
+                var response = await _http.PostAsync($"api/resources/{resourceId}/reingest", null);
+                SetStatus(response.IsSuccessStatusCode
+                    ? $"Queued {resourceId} for processing again. Refresh in a moment to see its status."
+                    : $"Re-ingest failed: {(int)response.StatusCode} {response.ReasonPhrase}.");
+                if (response.IsSuccessStatusCode) await RefreshDocumentsAsync();
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Re-ingest failed: {ex.Message}");
+            }
+        }
+
+        private async void OnDeleteFailedClicked(object sender, RoutedEventArgs e)
+        {
+            var failed = _managedResources.Where(m => m.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (failed.Count == 0) return;
+
+            var confirm = MessageBox.Show(
+                $"Delete {failed.Count} failed document(s)?\n\n{string.Join("\n", failed.Take(8).Select(f => "  " + f.Uri))}{(failed.Count > 8 ? "\n  …" : "")}\n\nThis cannot be undone.",
+                "Confirm Delete Failed", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            SetBusy("Deleting failed documents...");
+            try
+            {
+                var response = await _http.PostAsJsonAsync("api/resources/delete", new { status = "Failed" });
+                if (response.IsSuccessStatusCode)
+                {
+                    using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                    SetStatus($"Deleted {doc.RootElement.GetProperty("deleted").GetArrayLength()} failed document(s).");
+                    await RefreshDocumentsAsync();
+                }
+                else
+                {
+                    SetStatus($"Delete failed: {(int)response.StatusCode} {response.ReasonPhrase}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Delete failed: {ex.Message}");
             }
         }
 
@@ -442,6 +520,7 @@ namespace Knovara.Desktop
                 {
                     if (item is not null) _managedResources.Remove(item);
                     DocumentsSummaryText.Text = $" {_managedResources.Count} document(s) for tenant '{_tenantId}'";
+                    DeleteFailedButton.IsEnabled = _managedResources.Any(m => m.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase));
                     SetStatus($"Deleted {resourceId}.");
                 }
                 else if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -591,6 +670,53 @@ namespace Knovara.Desktop
             {
                 SearchResultBox.Text = $"=== EXCEPTION ===\nCould not reach API at {_baseUrl}\nError: {ex.Message}";
                 SetStatus($"Search failed: {ex.Message}");
+            }
+        }
+
+        private const long MaxUploadBytes = 25L * 1024 * 1024;
+
+        private async void OnUploadFileClicked(object sender, RoutedEventArgs e)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "Select a Document to Upload",
+                Filter = "Documents (*.pdf;*.docx;*.pptx;*.html;*.htm;*.md;*.markdown;*.txt)|*.pdf;*.docx;*.pptx;*.html;*.htm;*.md;*.markdown;*.txt"
+            };
+            if (dialog.ShowDialog() != true) return;
+
+            var info = new FileInfo(dialog.FileName);
+            if (info.Length == 0 || info.Length > MaxUploadBytes)
+            {
+                MessageBox.Show(info.Length == 0 ? "That file is empty." : $"That file is {info.Length / (1024 * 1024)} MB; the limit is {MaxUploadBytes / (1024 * 1024)} MB.",
+                    "Cannot Upload", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            SetBusy($"Uploading {info.Name}...");
+            try
+            {
+                var payload = new { fileName = info.Name, contentBase64 = Convert.ToBase64String(await File.ReadAllBytesAsync(dialog.FileName)) };
+                var response = await _http.PostAsJsonAsync("api/resources/upload", payload);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    IngestResultBox.Text = $"=== UPLOAD ACCEPTED ===\nStatus: {(int)response.StatusCode} {response.StatusCode}\n\n{FormatJson(content)}\n\n"
+                        + "Processing is asynchronous: check the Documents tab (or Resource Inspector) until it shows Ready.";
+                    SetStatus($"Uploaded {info.Name}.");
+                    try { StatusResourceIdBox.Text = JsonDocument.Parse(content).RootElement.GetProperty("resourceId").GetString() ?? ""; } catch { }
+                    await RefreshDocumentsAsync();
+                }
+                else
+                {
+                    IngestResultBox.Text = $"=== UPLOAD REJECTED ===\nStatus: {(int)response.StatusCode} {response.ReasonPhrase}\n\n{content}";
+                    SetStatus($"Upload failed: {(int)response.StatusCode}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                IngestResultBox.Text = $"=== EXCEPTION ===\nCould not reach API at {_baseUrl}\nError: {ex.Message}";
+                SetStatus($"Upload failed: {ex.Message}");
             }
         }
 

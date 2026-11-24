@@ -7,7 +7,12 @@ namespace Knovara.Mcp;
 
 // Mirrors of the API's JSON responses. Like the CLI, this talks the same public HTTP contract any external
 // caller would, rather than referencing Knovara.Core.
-public sealed record ResourceReference(string ResourceId, string Type, string Uri, string? SourceVersion, string TenantId, string Status);
+public sealed record ResourceReference(string ResourceId, string Type, string Uri, string? SourceVersion, string TenantId, string Status, string? Error = null);
+public sealed record ResourcePage(IReadOnlyList<ResourceReference> Items, int Total);
+public sealed record ResourceStats(int Resources, Dictionary<string, int> ByStatus, Dictionary<string, int> ByType, int Passages, int EmbeddedPassages, long ContentCharacters, long UploadedBytes);
+public sealed record PassageSummary(string NodeId, string Level, string Title, string? Content);
+public sealed record PassagePage(IReadOnlyList<PassageSummary> Items, int Total);
+public sealed record BulkDeleteResult(IReadOnlyList<string> Deleted, IReadOnlyList<string> NotDeleted);
 public sealed record EvidenceItem(string NodeId, string ResourceId, string Title, string Content, string SourceVersion, string RetrievedVia, double RelevanceScore);
 public sealed record ContextPackage(string QueryId, IReadOnlyList<EvidenceItem> Evidence, int EstimatedTokenCount);
 public sealed record RetrievalResult(string QueryId, IReadOnlyList<EvidenceItem> Evidence, bool EvidenceSufficient, string? FollowUpSearchHint, bool Reranked);
@@ -45,12 +50,44 @@ public sealed class KnovaraApiClient
     public Task<ResourceReference> IngestAsync(string uri, string type, CancellationToken ct) =>
         PostAsync<ResourceReference>("api/resources/ingest", new { uri, type }, ct);
 
-    public async Task<IReadOnlyList<ResourceReference>> ListAsync(CancellationToken ct)
+    public async Task<ResourcePage> ListAsync(string? status, string? type, string? search, int limit, int offset, CancellationToken ct)
     {
-        using var response = await SendAsync(() => _http.GetAsync("api/resources", ct));
+        var query = new List<string> { $"limit={limit}", $"offset={offset}" };
+        if (status is not null) query.Add($"status={Uri.EscapeDataString(status)}");
+        if (type is not null) query.Add($"type={Uri.EscapeDataString(type)}");
+        if (!string.IsNullOrWhiteSpace(search)) query.Add($"q={Uri.EscapeDataString(search)}");
+
+        using var response = await SendAsync(() => _http.GetAsync("api/resources?" + string.Join("&", query), ct));
         await ThrowIfFailedAsync(response, ct);
-        return await response.Content.ReadFromJsonAsync<List<ResourceReference>>(JsonOptions, ct) ?? [];
+        var items = await response.Content.ReadFromJsonAsync<List<ResourceReference>>(JsonOptions, ct) ?? [];
+        var total = response.Headers.TryGetValues("X-Total-Count", out var values) && int.TryParse(values.FirstOrDefault(), out var t) ? t : items.Count;
+        return new ResourcePage(items, total);
     }
+
+    public Task<ResourceStats> StatsAsync(CancellationToken ct) => GetJsonAsync<ResourceStats>("api/resources/stats", ct);
+
+    public async Task<PassagePage?> PassagesAsync(string resourceId, int limit, int offset, CancellationToken ct)
+    {
+        using var response = await SendAsync(() => _http.GetAsync(
+            $"api/resources/{Uri.EscapeDataString(resourceId)}/passages?limit={limit}&offset={offset}", ct));
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        await ThrowIfFailedAsync(response, ct);
+        return await response.Content.ReadFromJsonAsync<PassagePage>(JsonOptions, ct);
+    }
+
+    public Task<ResourceReference> UploadAsync(string fileName, string content, CancellationToken ct) =>
+        PostAsync<ResourceReference>("api/resources/upload", new { fileName, content }, ct);
+
+    public async Task<ResourceReference?> ReingestAsync(string resourceId, CancellationToken ct)
+    {
+        using var response = await SendAsync(() => _http.PostAsync($"api/resources/{Uri.EscapeDataString(resourceId)}/reingest", null, ct));
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        await ThrowIfFailedAsync(response, ct);
+        return await response.Content.ReadFromJsonAsync<ResourceReference>(JsonOptions, ct);
+    }
+
+    public Task<BulkDeleteResult> BulkDeleteAsync(IReadOnlyList<string>? resourceIds, string? status, CancellationToken ct) =>
+        PostAsync<BulkDeleteResult>("api/resources/delete", new { resourceIds, status }, ct);
 
     public async Task<ResourceReference?> GetAsync(string resourceId, CancellationToken ct)
     {
@@ -67,6 +104,14 @@ public sealed class KnovaraApiClient
         if (response.StatusCode == HttpStatusCode.NotFound) return false;
         await ThrowIfFailedAsync(response, ct);
         return true;
+    }
+
+    private async Task<T> GetJsonAsync<T>(string path, CancellationToken ct)
+    {
+        using var response = await SendAsync(() => _http.GetAsync(path, ct));
+        await ThrowIfFailedAsync(response, ct);
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions, ct)
+            ?? throw new McpException($"{path} returned an empty response.");
     }
 
     private async Task<T> PostAsync<T>(string path, object body, CancellationToken ct)

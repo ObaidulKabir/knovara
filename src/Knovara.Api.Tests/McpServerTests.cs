@@ -94,12 +94,13 @@ public class McpServerTests
     public async Task Ingest_RejectsUnknownTypeAndQueuesKnownOne()
     {
         var (tools, handler) = Create(_ => Json(HttpStatusCode.Accepted,
-            """{"resourceId":"r1","type":"Code","uri":"https://x/y.cs","sourceVersion":null,"tenantId":"acme","status":"Pending"}"""));
+            """{"resourceId":"r1","type":"Website","uri":"https://x/y","sourceVersion":null,"tenantId":"acme","status":"Pending"}"""));
 
         await Assert.ThrowsAsync<McpException>(() => tools.Ingest("https://x/y.cs", "Spreadsheet"));
+        await Assert.ThrowsAsync<McpException>(() => tools.Ingest("https://x/y.cs", "Code")); // the API rejects Code, so never offer it
         Assert.Empty(handler.Calls);
 
-        var text = await tools.Ingest("https://x/y.cs", "code");
+        var text = await tools.Ingest("https://x/y", "website");
         Assert.Contains("id=r1", text);
         Assert.Contains("status=Pending", text);
     }
@@ -182,11 +183,13 @@ public class McpServerTests
             .Select(m => m.GetCustomAttribute<McpServerToolAttribute>())
             .Where(a => a is not null).Select(a => a!).ToList();
 
-        Assert.Equal(6, tools.Count);
+        Assert.Equal(11, tools.Count);
         Assert.Equal(tools.Count, tools.Select(t => t.Name).Distinct().Count());
         // MCP's destructiveHint defaults to true when unset but only applies to tools that can write.
-        Assert.Equal(["knovara_delete_document"], tools.Where(t => !t.ReadOnly && t.Destructive).Select(t => t.Name).ToArray());
-        Assert.All(tools.Where(t => t.Name is "knovara_ask" or "knovara_search" or "knovara_list_documents" or "knovara_get_document_status"),
+        Assert.Equal(["knovara_delete_document", "knovara_delete_documents"],
+            tools.Where(t => !t.ReadOnly && t.Destructive).Select(t => t.Name).Order().ToArray());
+        Assert.All(tools.Where(t => t.Name is "knovara_ask" or "knovara_search" or "knovara_list_documents" or "knovara_get_document_status"
+                                         or "knovara_get_stats" or "knovara_list_passages"),
             t => Assert.True(t.ReadOnly));
     }
 
@@ -195,6 +198,133 @@ public class McpServerTests
         => Assert.Equal(Enum.GetNames<RetrievalMode>().Order(), KnovaraTools.SearchModes.Order());
 
     [Fact]
-    public void SourceTypes_MatchTheApisSourceTypes()
-        => Assert.Equal(Enum.GetNames<SourceType>().Order(), KnovaraTools.SourceTypes.Order());
+    public void SourceTypes_AreTheApisIngestableSourceTypes()
+        // Code is in the enum but POST /ingest answers 400 for it (pinned by Ingest_Code_IsRejected...), so it is not offered.
+        => Assert.Equal(Enum.GetNames<SourceType>().Where(n => n != nameof(SourceType.Code)).Order(), KnovaraTools.SourceTypes.Order());
+
+    [Fact]
+    public void Statuses_MatchTheApisResourceStatuses()
+        => Assert.Equal(Enum.GetNames<ResourceStatus>().Order(), KnovaraTools.Statuses.Order());
+
+    // ---- document-volume management tools ----------------------------------------------------
+
+    [Fact]
+    public async Task ListDocuments_SendsFiltersAndPaging_UsesTotalHeader_AndSaysHowToGetMore()
+    {
+        var (tools, handler) = Create(_ =>
+        {
+            var response = Json(HttpStatusCode.OK,
+                """[{"resourceId":"r1","type":"Website","uri":"https://a","sourceVersion":null,"tenantId":"acme","status":"Failed","error":"HTTP 404"}]""");
+            response.Headers.Add("X-Total-Count", "37");
+            return response;
+        });
+
+        var text = await tools.ListDocuments(status: "failed", type: "website", search: "a b", limit: 1, offset: 5);
+
+        Assert.Equal("http://api.test/api/resources?limit=1&offset=5&status=Failed&type=Website&q=a%20b", handler.Calls[0].Request.RequestUri!.AbsoluteUri);
+        Assert.Contains("6-6 of 37", text);
+        Assert.Contains("reason: HTTP 404", text);
+        Assert.Contains("offset=6", text);
+    }
+
+    [Theory]
+    [InlineData("Broken", null, 50, 0)]
+    [InlineData(null, "Code", 50, 0)]
+    [InlineData(null, null, 0, 0)]
+    [InlineData(null, null, 201, 0)]
+    [InlineData(null, null, 10, -1)]
+    public async Task ListDocuments_RejectsBadArgumentsWithoutCallingTheApi(string? status, string? type, int limit, int offset)
+    {
+        var (tools, handler) = Create(_ => Json(HttpStatusCode.OK, "[]"));
+        await Assert.ThrowsAsync<McpException>(() => tools.ListDocuments(status, type, null, limit, offset));
+        Assert.Empty(handler.Calls);
+    }
+
+    [Fact]
+    public async Task GetStats_SummarisesTheVolume()
+    {
+        var (tools, _) = Create(_ => Json(HttpStatusCode.OK,
+            """{"resources":3,"byStatus":{"Ready":2,"Failed":1},"byType":{"Document":3},"passages":120,"embeddedPassages":118,"contentCharacters":50000,"uploadedBytes":2048}"""));
+
+        var text = await tools.GetStats();
+
+        Assert.Contains("3 document(s): Ready 2, Failed 1", text);
+        Assert.Contains("120", text);
+        Assert.Contains("2,048", text);
+    }
+
+    [Fact]
+    public async Task ListPassages_ShowsTheStoredText_AndMissingDocumentIsAnError()
+    {
+        var (tools, handler) = Create(r => r.RequestUri!.AbsolutePath.Contains("ghost")
+            ? new HttpResponseMessage(HttpStatusCode.NotFound)
+            : Json(HttpStatusCode.OK, """{"items":[{"nodeId":"n","level":"paragraph","title":"Guide > Retry","content":"Five attempts."}],"total":1}"""));
+
+        var text = await tools.ListPassages("r1", limit: 5);
+
+        Assert.Contains("Guide > Retry", text);
+        Assert.Contains("Five attempts.", text);
+        Assert.Contains("limit=5&offset=0", handler.Calls[0].Request.RequestUri!.Query);
+        await Assert.ThrowsAsync<McpException>(() => tools.ListPassages("ghost"));
+    }
+
+    [Fact]
+    public async Task UploadDocument_SendsTheTextAsIs_AndRefusesNonTextNames()
+    {
+        var (tools, handler) = Create(_ => Json(HttpStatusCode.Accepted,
+            """{"resourceId":"r9","type":"Document","uri":"upload://runbook.md","sourceVersion":null,"tenantId":"acme","status":"Pending"}"""));
+
+        var text = await tools.UploadDocument("runbook.md", "# Runbook\nKeys rotate every 45 days.");
+
+        using var doc = JsonDocument.Parse(handler.Calls[0].Body!);
+        Assert.Equal("runbook.md", doc.RootElement.GetProperty("fileName").GetString());
+        Assert.Equal("# Runbook\nKeys rotate every 45 days.", doc.RootElement.GetProperty("content").GetString());
+        Assert.Contains("id=r9", text);
+
+        await Assert.ThrowsAsync<McpException>(() => tools.UploadDocument("report.pdf", "x"));
+        await Assert.ThrowsAsync<McpException>(() => tools.UploadDocument("a.md", "  "));
+        Assert.Single(handler.Calls);
+    }
+
+    [Fact]
+    public async Task ReingestDocument_PostsToTheResource_AndUnknownIdIsAnError()
+    {
+        var (tools, handler) = Create(r => r.RequestUri!.AbsolutePath.Contains("ghost")
+            ? new HttpResponseMessage(HttpStatusCode.NotFound)
+            : Json(HttpStatusCode.Accepted, """{"resourceId":"r1","type":"Document","uri":"a.md","sourceVersion":null,"tenantId":"acme","status":"Pending"}"""));
+
+        var text = await tools.ReingestDocument("r1");
+
+        Assert.Equal(HttpMethod.Post, handler.Calls[0].Request.Method);
+        Assert.EndsWith("/api/resources/r1/reingest", handler.Calls[0].Request.RequestUri!.AbsolutePath);
+        Assert.Contains("status=Pending", text);
+        await Assert.ThrowsAsync<McpException>(() => tools.ReingestDocument("ghost"));
+    }
+
+    [Fact]
+    public async Task DeleteDocuments_ByIdsAndStatus_SendsBothAndReportsWhatRemained()
+    {
+        var (tools, handler) = Create(_ => Json(HttpStatusCode.OK, """{"deleted":["a"],"notDeleted":["b"]}"""));
+
+        var text = await tools.DeleteDocuments(["a", "b", "a"], "failed");
+
+        using var doc = JsonDocument.Parse(handler.Calls[0].Body!);
+        Assert.Equal(["a", "b"], doc.RootElement.GetProperty("resourceIds").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal("Failed", doc.RootElement.GetProperty("status").GetString());
+        Assert.Contains("Deleted 1", text);
+        Assert.Contains("Not deleted", text);
+        Assert.Contains("b", text);
+    }
+
+    [Fact]
+    public async Task DeleteDocuments_WithNoSelector_IsRefusedLocally_SoItCanNeverMeanEverything()
+    {
+        var (tools, handler) = Create(_ => Json(HttpStatusCode.OK, """{"deleted":[],"notDeleted":[]}"""));
+
+        await Assert.ThrowsAsync<McpException>(() => tools.DeleteDocuments());
+        await Assert.ThrowsAsync<McpException>(() => tools.DeleteDocuments([]));
+        await Assert.ThrowsAsync<McpException>(() => tools.DeleteDocuments(["  "]));
+        await Assert.ThrowsAsync<McpException>(() => tools.DeleteDocuments(null, "Everything"));
+        Assert.Empty(handler.Calls);
+    }
 }

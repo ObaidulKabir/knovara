@@ -173,9 +173,15 @@ Every request carries an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads
 How far that header is trusted depends on the "Authentication" setting below.
 
 - `POST /api/resources/ingest` — `{ "uri": "samples/payment-service-guide.md", "type": "Document" }`. `type` is `Document` or `Website`; `Code` returns 400 until Phase 4.
-- `GET /api/resources/{resourceId}` — the resource, with its current version and status.
-- `GET /api/resources` — every resource registered for the caller's tenant, most recently updated first. Backs the desktop app's "Documents" tab.
-- `DELETE /api/resources/{resourceId}` — deletes the resource and everything derived from it (passages, embeddings, relationships all cascade from the one row in Postgres). `204` on success, `404` if it didn't exist for this tenant. Does not cancel a job already queued for it.
+- `GET /api/resources/{resourceId}` — the resource, with its current version, status and, if it `Failed`, the `error` reason.
+- `GET /api/resources` — the caller's resources, most recently updated first. Filter with `?status=Failed`, `?type=Website` and `?q=` (case-insensitive substring of the URI); page with `?limit=` (1-500, default 100) and `?offset=`. The total number of matches is in the `X-Total-Count` response header, so the body stays a plain array. Backs the desktop app's "Documents" tab.
+- `GET /api/resources/stats` — what the caller has stored: resources by status and type, searchable passages, embedded passages, characters of extracted text, bytes of uploaded originals. Use it to decide whether to prune.
+- `GET /api/resources/{resourceId}/passages?limit=&offset=` — the passages actually extracted and stored for the resource (text truncated to 500 characters), in reading order; to check a document was understood as expected.
+- `POST /api/resources/upload` — add a document from content you hold, with no shared volume or public URL: `{ "fileName": "runbook.md", "content": "# text…" }` or `{ "fileName": "report.pdf", "contentBase64": "…" }`. Supports pdf, docx, pptx, html, md (a `.txt` name is stored as `.md`); up to 25 MB. Returns `202` and the resource, like ingest. Uploading the same `fileName` again **replaces** the document and re-processes it. The bytes are kept in Postgres (`resource_uploads`) and the worker fetches them back from the API, so the worker needs `KNOVARA_API_BASE_URL` to reach it (it already does for its callbacks).
+- `GET /api/resources/{resourceId}/content` — the original bytes of an uploaded document (`404` for URL-sourced resources).
+- `POST /api/resources/{resourceId}/reingest` — queue an existing resource for processing again (retry a `Failed` one, or pick up a changed web page). Its current content stays searchable until the new version is ready.
+- `DELETE /api/resources/{resourceId}` — deletes the resource and everything derived from it (passages, embeddings, relationships, the uploaded original — all cascade from the one row in Postgres). `204` on success, `404` if it didn't exist for this tenant. Does not cancel a job already queued for it.
+- `POST /api/resources/delete` — bulk delete: `{ "resourceIds": ["…"] }` and/or `{ "status": "Failed" }` (when both are given a resource must match both). Returns `{ "deleted": [...], "notDeleted": [...] }`; ids that are missing, belong to another tenant, or are in a different status land in `notDeleted`. One selector is required (max 1000 ids): there is deliberately no "delete everything" call, so wiping a tenant means listing and naming the ids.
 - `POST /api/resources/{resourceId}/version`, `/nodes`, `/failure` — called by the worker.
 - `POST /api/retrieval/ask` — `{ "sessionId": "s1", "question": "maximum retry interval" }`. Evidence cache → on a miss, `Adaptive` retrieval → each passage re-read from Postgres and dropped if its source has changed → context optimization. Returns a `ContextPackage`. An optional `"documents": [{ "title": "...", "content": "...", "source": "..." }]` attaches ad-hoc text (the desktop app's "Attach Files" and "Attach Folder" use this, as does dragging files or folders onto the panel - results show inline with an Undo, each document lists its name, folder and estimated tokens with a one-click remove, and the summary warns when the attachments exceed the Ask token budget; a folder attaches every text file under it, recursively, up to 200 files / 1 MB each / 8 MB total, skipping `node_modules`, `bin`, `obj`, `.git` and similar, and reports what it skipped. Local to the desktop app: nothing is ingested into the corpus). Each document is chunked on structural boundaries ([`PinnedDocumentChunker`](src/Knovara.ContextOptimization/PinnedDocumentChunker.cs), 300-token chunks) and every chunk is scored against the question by the same cross-encoder `HybridRerank`/`Adaptive` use — it is genuinely retrieved, not pinned in whole regardless of relevance. A document large enough to need more than one chunk only contributes the chunks that actually answer the question once the token budget is tight; attached content still ranks above ordinary corpus evidence (`PinnedDocumentBaseScore`), since the caller chose to attach it. If the model service is unreachable, chunks fall back to their original order rather than failing the request. All chunks of all attached documents are scored together in batched model-service calls, so a folder costs about the same per chunk as a single file.
 - `POST /api/retrieval/search` — `{ "question": "maximum retry interval", "mode": "Semantic", "topK": 10 }`. Runs one retrieval mode with no cache and no context optimization, for the benchmark. `mode` is `Lexical`, `Semantic`, `Hybrid`, `HybridRerank` or `Adaptive` (default); `topK` defaults to 5. The response's `reranked` field says whether that answer went through the cross-encoder.
@@ -228,9 +234,7 @@ dotnet run --project src/Knovara.Cli -- search "maximum retry interval" --mode S
 
 `--api` (default `http://127.0.0.1:5299`, or `$KNOVARA_API_URL`) and `--tenant` (required: pass it
 or set `$KNOVARA_TENANT`) work on every command. Run `dotnet run --project src/Knovara.Cli -- help`
-for the full list. One known gap, found while building this: `GET /api/resources/{id}` doesn't
-expose a failed resource's error message yet, even though it's recorded in Postgres (`last_error`)
-— `status`/`watch` say so rather than hiding it.
+for the full list. `status`/`watch` show a failed resource's reason.
 
 ## MCP server
 
@@ -243,10 +247,15 @@ HTTP API.
 |---|---|---|
 | `knovara_ask` | Source-cited passages for a question, packed to a token budget | read-only |
 | `knovara_search` | One retrieval mode (`Adaptive`, `Lexical`, `Semantic`, `Hybrid`, `HybridRerank`) with raw ranked passages | read-only |
-| `knovara_list_documents` | Every document for the tenant with its status | read-only |
-| `knovara_get_document_status` | Status of one document | read-only |
+| `knovara_list_documents` | Documents with status and failure reasons; filter by status/type/text, page with limit/offset | read-only |
+| `knovara_get_stats` | Size of the volume: documents by status/type, passages, embeddings, text and upload bytes | read-only |
+| `knovara_get_document_status` | Status (and failure reason) of one document | read-only |
+| `knovara_list_passages` | The passages actually stored for a document, to check it was understood | read-only |
+| `knovara_upload_document` | Add a text/markdown document from content you provide; the same fileName replaces it | writes |
 | `knovara_ingest` | Queue a URL / worker-volume path for ingestion (async; poll the status tool) | writes |
-| `knovara_delete_document` | Permanently delete a document and its derived data | **destructive** |
+| `knovara_reingest_document` | Process an existing document again (retry a failure, refresh a page) | writes |
+| `knovara_delete_document` | Permanently delete one document and its derived data | **destructive** |
+| `knovara_delete_documents` | Permanently delete many, by ids and/or status (e.g. every `Failed`); never "everything" | **destructive** |
 
 Configuration is by environment variable:
 
@@ -279,8 +288,9 @@ or in a client's JSON config (`.mcp.json`, Claude Desktop's `claude_desktop_conf
 }
 ```
 
-The API must be running (see "Run locally"). `knovara_ingest` has the same limit as the desktop app: the
-worker reads URLs or files in its source volume, not paths on the client machine. Over stdio the server only
+The API must be running (see "Run locally"). `knovara_ingest` takes URLs or files in the worker's source
+volume, not paths on the client machine; to add content you hold, use `knovara_upload_document` (text/markdown;
+the REST upload endpoint also takes pdf, docx, pptx and html). Over stdio the server only
 speaks to the local client that launched it; it opens no network port.
 
 ## Run locally

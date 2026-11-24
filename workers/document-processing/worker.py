@@ -127,6 +127,21 @@ def fetch(uri: str) -> FetchedSource:
     return read_local(uri)
 
 
+UPLOAD_PREFIX = "upload://"  # must match Knovara.Core UploadUri.Prefix
+
+
+def fetch_upload(api: "Api", job: IngestionJob) -> FetchedSource:
+    """Documents added through the API's upload endpoint are stored by the API; fetch them back from it."""
+    name = job.uri[len(UPLOAD_PREFIX):]
+    suffix = PurePosixPath(name).suffix.lower()
+    if suffix not in SUPPORTED_SUFFIXES:
+        raise SourceError(f"'{suffix or 'no extension'}' is not a supported format ({', '.join(sorted(SUPPORTED_SUFFIXES))})")
+    data = api.download_upload(job.resource_id)
+    if len(data) > MAX_SOURCE_BYTES:
+        raise SourceError(f"'{name}' is larger than {MAX_SOURCE_BYTES} bytes")
+    return FetchedSource(data, suffix, name)
+
+
 def read_local(relative: str) -> FetchedSource:
     root = SOURCE_ROOT.resolve()
     candidate = (root / PurePosixPath(relative.replace("\\", "/"))).resolve()
@@ -487,13 +502,26 @@ class Api:
     def fail(self, resource_id: str, error: str) -> None:
         self._post(f"/api/resources/{resource_id}/failure", {"error": error[:2000]})
 
+    def download_upload(self, resource_id: str) -> bytes:
+        """The bytes of a document uploaded through POST /api/resources/upload."""
+        try:
+            response = self._client.get(f"/api/resources/{resource_id}/content")
+        except httpx.TransportError as exc:
+            raise ApiUnavailable(f"GET content of {resource_id}: {exc}") from exc
+        if response.status_code == 404:
+            raise SourceError("the uploaded content is no longer stored (the resource was deleted or never uploaded)")
+        if response.status_code >= 500:
+            raise ApiUnavailable(f"GET content of {resource_id} returned {response.status_code}")
+        response.raise_for_status()
+        return response.content
+
 
 # --------------------------------------------------------------------------- consuming
 
 def process(converter: DocumentConverter, job: IngestionJob) -> None:
     with Api(job.tenant_id) as api:
         try:
-            source = fetch(job.uri)
+            source = fetch_upload(api, job) if job.uri.startswith(UPLOAD_PREFIX) else fetch(job.uri)
             content_hash = "sha256:" + hashlib.sha256(EXTRACTOR_VERSION.encode() + b"\0" + source.data).hexdigest()
             if not api.version_changed(job.resource_id, content_hash):
                 logger.info("%s unchanged (%s), skipped", job.uri, content_hash[:19])

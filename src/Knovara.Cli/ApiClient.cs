@@ -7,7 +7,7 @@ namespace Knovara.Cli;
 
 // Mirrors of the API's response shapes. The CLI deliberately does not reference Knovara.Core: it
 // talks the same public HTTP contract any external caller would, the way an SDK consumer does.
-public sealed record ResourceReference(string ResourceId, string Type, string Uri, string? SourceVersion, string TenantId, string Status);
+public sealed record ResourceReference(string ResourceId, string Type, string Uri, string? SourceVersion, string TenantId, string Status, string? Error = null);
 public sealed record EvidenceItem(string NodeId, string ResourceId, string Title, string Content, string SourceVersion, string RetrievedVia, double RelevanceScore);
 public sealed record ContextPackage(string QueryId, IReadOnlyList<EvidenceItem> Evidence, int EstimatedTokenCount);
 public sealed record RetrievalResult(string QueryId, IReadOnlyList<EvidenceItem> Evidence, bool EvidenceSufficient, string? FollowUpSearchHint, bool Reranked);

@@ -197,7 +197,7 @@ static void PrintResource(ResourceReference resource)
     Console.WriteLine($"  type: {resource.Type}   status: {resource.Status}   version: {resource.SourceVersion ?? "(none yet)"}");
     if (resource.Status == "Failed")
     {
-        Console.WriteLine("  the API does not expose the failure reason yet; check the worker's logs.");
+        Console.WriteLine($"  reason: {resource.Error ?? "(none recorded; check the worker's logs)"}");
     }
 }
 

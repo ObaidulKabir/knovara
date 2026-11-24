@@ -9,7 +9,7 @@ namespace Knovara.KnowledgeRepresentation;
 /// <summary>Postgres implementation of the Resource &amp; Knowledge Store (D1). Schema: infra/postgres/init.sql.</summary>
 public sealed class PostgresKnowledgeStore(NpgsqlDataSource dataSource) : IKnowledgeStore
 {
-    private const string ResourceColumns = "resource_id, source_type, uri, source_version, tenant_id, status";
+    private const string ResourceColumns = "resource_id, source_type, uri, source_version, tenant_id, status, last_error";
 
     public async Task<ResourceReference> RegisterResourceAsync(string tenantId, string uri, SourceType type, CancellationToken ct = default)
     {
@@ -40,19 +40,119 @@ public sealed class PostgresKnowledgeStore(NpgsqlDataSource dataSource) : IKnowl
         return await reader.ReadAsync(ct) ? ReadResource(reader) : null;
     }
 
-    public async Task<IReadOnlyList<ResourceReference>> ListResourcesAsync(string tenantId, CancellationToken ct = default)
+    public async Task<ResourcePage> QueryResourcesAsync(string tenantId, ResourceFilter filter, CancellationToken ct = default)
     {
-        await using var cmd = dataSource.CreateCommand(
-            $"SELECT {ResourceColumns} FROM resources WHERE tenant_id = @tenant ORDER BY updated_at DESC");
-        cmd.Parameters.AddWithValue("tenant", tenantId);
+        var where = new List<string> { "tenant_id = @tenant" };
+        if (filter.Status is not null) where.Add("status = @status");
+        if (filter.Type is not null) where.Add("source_type = @type");
+        var search = string.IsNullOrWhiteSpace(filter.UriContains) ? null : "%" + EscapeLike(filter.UriContains.Trim()) + "%";
+        if (search is not null) where.Add("uri ILIKE @uriLike");
+        var clause = string.Join(" AND ", where);
 
-        var resources = new List<ResourceReference>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        void Bind(NpgsqlCommand c)
         {
-            resources.Add(ReadResource(reader));
+            c.Parameters.AddWithValue("tenant", tenantId);
+            if (filter.Status is { } status) c.Parameters.AddWithValue("status", status.ToString().ToLowerInvariant());
+            if (filter.Type is { } type) c.Parameters.AddWithValue("type", type.ToString());
+            if (search is not null) c.Parameters.AddWithValue("uriLike", search);
         }
-        return resources;
+
+        int total;
+        await using (var count = dataSource.CreateCommand($"SELECT count(*) FROM resources WHERE {clause}"))
+        {
+            Bind(count);
+            total = Convert.ToInt32(await count.ExecuteScalarAsync(ct));
+        }
+
+        var items = new List<ResourceReference>();
+        await using (var cmd = dataSource.CreateCommand(
+            $"SELECT {ResourceColumns} FROM resources WHERE {clause} ORDER BY updated_at DESC, resource_id LIMIT @limit OFFSET @offset"))
+        {
+            Bind(cmd);
+            cmd.Parameters.AddWithValue("limit", filter.Limit);
+            cmd.Parameters.AddWithValue("offset", filter.Offset);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) items.Add(ReadResource(reader));
+        }
+
+        return new ResourcePage(items, total);
+    }
+
+    public async Task<ResourceStats> GetStatsAsync(string tenantId, CancellationToken ct = default)
+    {
+        var byStatus = Enum.GetNames<ResourceStatus>().ToDictionary(n => n, _ => 0);
+        var byType = Enum.GetNames<SourceType>().ToDictionary(n => n, _ => 0);
+
+        await using (var cmd = dataSource.CreateCommand(
+            "SELECT 'status', status, count(*) FROM resources WHERE tenant_id = @tenant GROUP BY status " +
+            "UNION ALL SELECT 'type', source_type, count(*) FROM resources WHERE tenant_id = @tenant GROUP BY source_type"))
+        {
+            cmd.Parameters.AddWithValue("tenant", tenantId);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var count = (int)reader.GetInt64(2);
+                if (reader.GetString(0) == "status") byStatus[Enum.Parse<ResourceStatus>(reader.GetString(1), ignoreCase: true).ToString()] = count;
+                else byType[Enum.Parse<SourceType>(reader.GetString(1)).ToString()] = count;
+            }
+        }
+
+        int passages, embedded;
+        long characters, uploaded;
+        await using (var cmd = dataSource.CreateCommand("""
+            SELECT
+              (SELECT count(*) FROM knowledge_nodes n JOIN resources r ON r.resource_id = n.resource_id
+                WHERE r.tenant_id = @tenant AND n.original_content IS NOT NULL),
+              (SELECT count(*) FROM knowledge_nodes n JOIN resources r ON r.resource_id = n.resource_id
+                WHERE r.tenant_id = @tenant AND n.embedding IS NOT NULL),
+              (SELECT coalesce(sum(length(n.original_content)), 0) FROM knowledge_nodes n JOIN resources r ON r.resource_id = n.resource_id
+                WHERE r.tenant_id = @tenant),
+              (SELECT coalesce(sum(u.size_bytes), 0) FROM resource_uploads u JOIN resources r ON r.resource_id = u.resource_id
+                WHERE r.tenant_id = @tenant)
+            """))
+        {
+            cmd.Parameters.AddWithValue("tenant", tenantId);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            passages = (int)reader.GetInt64(0);
+            embedded = (int)reader.GetInt64(1);
+            characters = Convert.ToInt64(reader.GetValue(2));
+            uploaded = Convert.ToInt64(reader.GetValue(3));
+        }
+
+        return new ResourceStats(byStatus.Values.Sum(), byStatus, byType, passages, embedded, characters, uploaded);
+    }
+
+    public async Task<PassagePage?> ListPassagesAsync(string tenantId, string resourceId, int limit, int offset, CancellationToken ct = default)
+    {
+        if (await GetResourceAsync(tenantId, resourceId, ct) is null) return null;
+
+        int total;
+        await using (var count = dataSource.CreateCommand(
+            "SELECT count(*) FROM knowledge_nodes WHERE resource_id = @id AND original_content IS NOT NULL"))
+        {
+            count.Parameters.AddWithValue("id", resourceId);
+            total = Convert.ToInt32(await count.ExecuteScalarAsync(ct));
+        }
+
+        var items = new List<PassageSummary>();
+        await using (var cmd = dataSource.CreateCommand("""
+            SELECT node_id, level, title, left(original_content, 500)
+            FROM knowledge_nodes WHERE resource_id = @id AND original_content IS NOT NULL
+            ORDER BY ordinal LIMIT @limit OFFSET @offset
+            """))
+        {
+            cmd.Parameters.AddWithValue("id", resourceId);
+            cmd.Parameters.AddWithValue("limit", limit);
+            cmd.Parameters.AddWithValue("offset", offset);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                items.Add(new PassageSummary(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3)));
+            }
+        }
+
+        return new PassagePage(items, total);
     }
 
     public async Task<bool> DeleteResourceAsync(string tenantId, string resourceId, CancellationToken ct = default)
@@ -62,6 +162,87 @@ public sealed class PostgresKnowledgeStore(NpgsqlDataSource dataSource) : IKnowl
         cmd.Parameters.AddWithValue("tenant", tenantId);
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
+
+    public async Task<IReadOnlyList<string>> DeleteResourcesAsync(
+        string tenantId, IReadOnlyCollection<string>? resourceIds, ResourceStatus? status, CancellationToken ct = default)
+    {
+        if (resourceIds is null && status is null)
+        {
+            throw new ArgumentException("Bulk delete needs resource ids and/or a status; it will not delete everything by default.");
+        }
+
+        // Selectors narrow each other (AND), so ids + status means "these ids, but only if they are in this status".
+        var where = new List<string> { "tenant_id = @tenant" };
+        if (resourceIds is not null) where.Add("resource_id = ANY(@ids)");
+        if (status is not null) where.Add("status = @status");
+
+        await using var cmd = dataSource.CreateCommand($"DELETE FROM resources WHERE {string.Join(" AND ", where)} RETURNING resource_id");
+        cmd.Parameters.AddWithValue("tenant", tenantId);
+        if (resourceIds is not null) cmd.Parameters.AddWithValue("ids", resourceIds.ToArray());
+        if (status is { } s) cmd.Parameters.AddWithValue("status", s.ToString().ToLowerInvariant());
+
+        var deleted = new List<string>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) deleted.Add(reader.GetString(0));
+        return deleted;
+    }
+
+    public async Task<ResourceReference> SaveUploadAsync(string tenantId, string fileName, byte[] content, CancellationToken ct = default)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        ResourceReference resource;
+        await using (var register = new NpgsqlCommand($"""
+            INSERT INTO resources (resource_id, tenant_id, source_type, uri, status)
+            VALUES (@id, @tenant, 'Document', @uri, 'pending')
+            ON CONFLICT (tenant_id, uri) DO UPDATE
+                SET status = 'pending', last_error = NULL, updated_at = now()
+            RETURNING {ResourceColumns}
+            """, conn, tx))
+        {
+            register.Parameters.AddWithValue("id", Guid.NewGuid().ToString("n"));
+            register.Parameters.AddWithValue("tenant", tenantId);
+            register.Parameters.AddWithValue("uri", UploadUri.For(fileName));
+            await using var reader = await register.ExecuteReaderAsync(ct);
+            await reader.ReadAsync(ct);
+            resource = ReadResource(reader);
+        }
+
+        await using (var store = new NpgsqlCommand("""
+            INSERT INTO resource_uploads (resource_id, file_name, content, size_bytes)
+            VALUES (@id, @name, @content, @size)
+            ON CONFLICT (resource_id) DO UPDATE
+                SET file_name = @name, content = @content, size_bytes = @size, uploaded_at = now()
+            """, conn, tx))
+        {
+            store.Parameters.AddWithValue("id", resource.ResourceId);
+            store.Parameters.AddWithValue("name", fileName);
+            store.Parameters.Add(new NpgsqlParameter("content", NpgsqlDbType.Bytea) { Value = content });
+            store.Parameters.AddWithValue("size", (long)content.Length);
+            await store.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+        return resource;
+    }
+
+    public async Task<StoredUpload?> GetUploadAsync(string tenantId, string resourceId, CancellationToken ct = default)
+    {
+        await using var cmd = dataSource.CreateCommand("""
+            SELECT u.file_name, u.content FROM resource_uploads u
+            JOIN resources r ON r.resource_id = u.resource_id
+            WHERE u.resource_id = @id AND r.tenant_id = @tenant
+            """);
+        cmd.Parameters.AddWithValue("id", resourceId);
+        cmd.Parameters.AddWithValue("tenant", tenantId);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? new StoredUpload(reader.GetString(0), (byte[])reader.GetValue(1)) : null;
+    }
+
+    /// <summary>Escapes LIKE wildcards (Postgres' default escape character is backslash) so a search for "100%_done" matches that text literally.</summary>
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     public async Task<VersionCheck> CheckVersionAsync(string tenantId, string resourceId, string contentHash, string embeddingModel, CancellationToken ct = default)
     {
@@ -245,5 +426,6 @@ public sealed class PostgresKnowledgeStore(NpgsqlDataSource dataSource) : IKnowl
         Uri: reader.GetString(2),
         SourceVersion: reader.IsDBNull(3) ? null : reader.GetString(3),
         TenantId: reader.GetString(4),
-        Status: Enum.Parse<ResourceStatus>(reader.GetString(5), ignoreCase: true));
+        Status: Enum.Parse<ResourceStatus>(reader.GetString(5), ignoreCase: true),
+        Error: reader.IsDBNull(6) ? null : reader.GetString(6));
 }
