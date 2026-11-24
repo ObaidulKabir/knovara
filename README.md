@@ -23,6 +23,7 @@ built yet.
 ```
 src/
   Knovara.Api                      API gateway (ASP.NET Core Web API)
+  Knovara.Cli                      Thin CLI over the API (no project reference to the server)
   Knovara.Core                     Shared domain models + service contracts
   Knovara.Ingestion                RabbitMQ ingestion queue
   Knovara.KnowledgeRepresentation  Hierarchy validation + Postgres Resource & Knowledge Store (D1)
@@ -169,6 +170,26 @@ Every request carries an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads
 - `POST /api/retrieval/search` — `{ "question": "maximum retry interval", "mode": "Semantic", "topK": 10 }`. Runs one retrieval mode with no cache and no context optimization, for the benchmark. `mode` is `Lexical`, `Semantic`, `Hybrid`, `HybridRerank` or `Adaptive` (default); `topK` defaults to 5. The response's `reranked` field says whether that answer went through the cross-encoder.
 - `GET/PUT /api/memory/sessions/{sessionId}` — session knowledge memory.
 - `GET /api/evaluation/recent` — recent per-task metrics, including whether the evidence cache was hit.
+
+## CLI
+
+`Knovara.Cli` is a thin usability shell over those endpoints — the kind of demonstration/dogfooding
+layer system_architecture.md's "Application Type & Deployment Model" calls for alongside the core
+engine, not a design investment. It has no project reference to the server: it speaks the same
+public HTTP contract any external client would.
+
+```powershell
+dotnet run --project src/Knovara.Cli -- ingest samples/payment-service-guide.md --tenant acme
+dotnet run --project src/Knovara.Cli -- watch  <resourceId> --tenant acme
+dotnet run --project src/Knovara.Cli -- ask    "how long are payment logs retained" --tenant acme
+dotnet run --project src/Knovara.Cli -- search "maximum retry interval" --mode Semantic --tenant acme
+```
+
+`--api` (default `http://127.0.0.1:5299`, or `$KNOVARA_API_URL`) and `--tenant` (required: pass it
+or set `$KNOVARA_TENANT`) work on every command. Run `dotnet run --project src/Knovara.Cli -- help`
+for the full list. One known gap, found while building this: `GET /api/resources/{id}` doesn't
+expose a failed resource's error message yet, even though it's recorded in Postgres (`last_error`)
+— `status`/`watch` say so rather than hiding it.
 
 ## Run locally
 
