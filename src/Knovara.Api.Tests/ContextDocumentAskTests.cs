@@ -8,6 +8,7 @@ using Knovara.ContextOptimization;
 using Knovara.Core.Contracts;
 using Knovara.Core.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -19,10 +20,16 @@ namespace Knovara.Api.Tests
         private readonly Mock<IContextMemoryService> _mockMemory = new();
         private readonly Mock<IKnowledgeStore> _mockStore = new();
         private readonly Mock<IEvaluationService> _mockEval = new();
+        private readonly Mock<IModelService> _mockModels = new();
         private readonly IContextOptimizationService _optimization = new TokenBudgetContextOptimizationService();
 
         private RetrievalController CreateController()
         {
+            // Neutral by default: tests that don't care about relevance scoring get every attached
+            // chunk scored 0, so PinnedDocumentBaseScore alone decides pinned-vs-corpus ordering.
+            _mockModels.Setup(m => m.RerankAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+                       .ReturnsAsync((string _, IReadOnlyList<string> chunks, CancellationToken _) => chunks.Select(_ => 0.0).ToList());
+
             // Default setup for memory: no cached evidence, empty session knowledge
             _mockMemory.Setup(m => m.GetCachedEvidenceAsync(It.IsAny<EvidenceCacheKey>(), It.IsAny<CancellationToken>()))
                        .ReturnsAsync((RetrievalResult?)null);
@@ -49,7 +56,9 @@ namespace Knovara.Api.Tests
                 _optimization,
                 _mockMemory.Object,
                 _mockStore.Object,
-                _mockEval.Object);
+                _mockEval.Object,
+                _mockModels.Object,
+                NullLogger<RetrievalController>.Instance);
         }
 
         [Fact]
@@ -153,9 +162,78 @@ namespace Knovara.Api.Tests
             var contextPackage = Assert.IsType<ContextPackage>(okResult.Value);
 
             Assert.Equal(2, contextPackage.Evidence.Count);
-            // Pinned document has score 1.0, so it appears first
+            // PinnedDocumentBaseScore keeps the attached document above any corpus score observed.
             Assert.Equal("Custom Spec", contextPackage.Evidence[0].Title);
             Assert.Equal("General Handbook", contextPackage.Evidence[1].Title);
+        }
+
+        /// <summary>
+        /// The point of actually processing an attachment for retrieval, not just pinning it whole:
+        /// when a large document cannot all fit the budget, the chunk that is genuinely relevant to
+        /// THIS question must be the one kept - not whichever chunk happens to come first in the file.
+        /// </summary>
+        [Fact]
+        public async Task Ask_WithLargeAddedDocument_KeepsTheRelevantChunkWithinBudget()
+        {
+            // Arrange
+            var controller = CreateController();
+            // Each paragraph alone (~700 chars) stays under PinnedDocumentChunker's 1200-char cap, so
+            // neither is split further; together (~1400) they exceed it, so the chunker places them
+            // in two separate chunks - letting the budget below admit only one of the two.
+            var irrelevantChunk = string.Join(" ", Enumerable.Repeat("Unrelated filler text about office furniture procurement.", 12));
+            var relevantChunk = string.Join(" ", Enumerable.Repeat("The Fairhaven pilot processed 4812 invoices in March.", 12));
+            var content = irrelevantChunk + "\n\n" + relevantChunk;
+            var doc = new ContextDocument("Pilot Notes", content, "pilot-notes.md");
+
+            // The real model service would score the relevant chunk higher for this question; the
+            // mock stands in for that judgement so the test is deterministic.
+            _mockModels.Setup(m => m.RerankAsync("How many invoices did the pilot process?", It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+                       .ReturnsAsync((string _, IReadOnlyList<string> chunks, CancellationToken _) =>
+                           chunks.Select(c => c.Contains("invoices") ? 5.0 : -5.0).ToList());
+
+            var request = new AskRequest(
+                SessionId: "session-large-doc",
+                Question: "How many invoices did the pilot process?",
+                TokenBudget: 200, // each chunk is ~170 tokens, so only one of the two fits
+                ResourceIds: null,
+                Documents: new List<ContextDocument> { doc });
+
+            // Act
+            var actionResult = await controller.Ask("test-tenant", request, CancellationToken.None);
+
+            // Assert
+            var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+            var contextPackage = Assert.IsType<ContextPackage>(okResult.Value);
+
+            Assert.NotEmpty(contextPackage.Evidence);
+            Assert.All(contextPackage.Evidence, e => Assert.Contains("invoices", e.Content));
+            Assert.DoesNotContain(contextPackage.Evidence, e => e.Content.Contains("furniture"));
+        }
+
+        [Fact]
+        public async Task Ask_WhenModelServiceFails_StillReturnsTheAttachedDocument()
+        {
+            // Arrange
+            var controller = CreateController();
+            _mockModels.Setup(m => m.RerankAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+                       .ThrowsAsync(new HttpRequestException("model service unreachable"));
+
+            var doc = new ContextDocument("Notes", "Short note that does not need reranking to matter.", "notes.md");
+            var request = new AskRequest(
+                SessionId: "session-degraded",
+                Question: "What does the note say?",
+                TokenBudget: 2000,
+                ResourceIds: null,
+                Documents: new List<ContextDocument> { doc });
+
+            // Act
+            var actionResult = await controller.Ask("test-tenant", request, CancellationToken.None);
+
+            // Assert: a model-service outage must not break attaching a document.
+            var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+            var contextPackage = Assert.IsType<ContextPackage>(okResult.Value);
+            Assert.Single(contextPackage.Evidence);
+            Assert.Equal("Notes", contextPackage.Evidence[0].Title);
         }
     }
 }

@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Knovara.ContextOptimization;
 using Knovara.Core.Contracts;
 using Knovara.Core.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Knovara.Api.Controllers;
 
@@ -21,24 +23,38 @@ public sealed partial class RetrievalController : ControllerBase
 {
     private const string IndexVersion = "idx-v1";
 
+    /// <summary>
+    /// Added above any corpus-retrieved score we have observed (cosine similarity tops out near 1,
+    /// cross-encoder logits near a few points either side of 0), so a pinned document still generally
+    /// outranks corpus evidence - the user explicitly chose to attach it - while the reranker score
+    /// added to it still orders a document's own chunks by their real relevance to the question.
+    /// </summary>
+    private const double PinnedDocumentBaseScore = 10.0;
+
     private readonly IIntelligentRetrievalService _retrieval;
     private readonly IContextOptimizationService _optimization;
     private readonly IContextMemoryService _memory;
     private readonly IKnowledgeStore _store;
     private readonly IEvaluationService _evaluation;
+    private readonly IModelService _models;
+    private readonly ILogger<RetrievalController> _logger;
 
     public RetrievalController(
         IIntelligentRetrievalService retrieval,
         IContextOptimizationService optimization,
         IContextMemoryService memory,
         IKnowledgeStore store,
-        IEvaluationService evaluation)
+        IEvaluationService evaluation,
+        IModelService models,
+        ILogger<RetrievalController> logger)
     {
         _retrieval = retrieval;
         _optimization = optimization;
         _memory = memory;
         _store = store;
         _evaluation = evaluation;
+        _models = models;
+        _logger = logger;
     }
 
     /// <summary>
@@ -87,14 +103,26 @@ public sealed partial class RetrievalController : ControllerBase
             foreach (var doc in request.Documents)
             {
                 if (string.IsNullOrWhiteSpace(doc.Content)) continue;
-                pinnedEvidence.Add(new EvidenceItem(
-                    NodeId: $"user-doc-{Guid.NewGuid():n}",
-                    ResourceId: doc.Source ?? "direct-context-doc",
-                    Title: string.IsNullOrWhiteSpace(doc.Title) ? "Added Document" : doc.Title,
-                    Content: doc.Content,
-                    SourceVersion: "current",
-                    RetrievedVia: IndexKind.Structural,
-                    RelevanceScore: 1.0));
+
+                // Chunked and scored against this question, not pinned whole at a flat score: a large
+                // attachment becomes retrievable passages, so when it cannot all fit the token budget,
+                // the passages actually relevant to the question are the ones that make it in.
+                var chunks = PinnedDocumentChunker.Chunk(doc.Content);
+                var scores = await ScoreChunksAsync(request.Question, chunks, ct);
+                var resourceId = doc.Source ?? "direct-context-doc";
+                var baseTitle = string.IsNullOrWhiteSpace(doc.Title) ? "Added Document" : doc.Title;
+
+                for (var i = 0; i < chunks.Count; i++)
+                {
+                    pinnedEvidence.Add(new EvidenceItem(
+                        NodeId: $"user-doc-{Guid.NewGuid():n}",
+                        ResourceId: resourceId,
+                        Title: chunks.Count > 1 ? $"{baseTitle} ({i + 1}/{chunks.Count})" : baseTitle,
+                        Content: chunks[i],
+                        SourceVersion: "current",
+                        RetrievedVia: IndexKind.Semantic,
+                        RelevanceScore: PinnedDocumentBaseScore + scores[i]));
+                }
             }
         }
 
@@ -153,6 +181,25 @@ public sealed partial class RetrievalController : ControllerBase
     {
         var query = new RetrievalQuery(Guid.NewGuid().ToString("n"), tenantId, SessionId: "benchmark", request.Question, Mode: request.Mode, TopK: request.TopK);
         return Ok(await _retrieval.RetrieveAsync(query, ct));
+    }
+
+    /// <summary>
+    /// Real relevance to this question, via the same cross-encoder the corpus's HybridRerank/Adaptive
+    /// modes use - not assumed. If the model service is unreachable, attaching a document must still
+    /// work, so every chunk falls back to an equal score (reading order) rather than failing the ask.
+    /// </summary>
+    private async Task<IReadOnlyList<double>> ScoreChunksAsync(string question, IReadOnlyList<string> chunks, CancellationToken ct)
+    {
+        if (chunks.Count == 0) return [];
+        try
+        {
+            return await _models.RerankAsync(question, chunks, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not score attached-document chunks against the question; keeping them in their original order.");
+            return chunks.Select(_ => 0.0).ToList();
+        }
     }
 
     private async Task<bool> AllCurrentAsync(IReadOnlyList<EvidenceItem> evidence, string tenantId, CancellationToken ct)
