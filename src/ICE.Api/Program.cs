@@ -5,6 +5,7 @@ using ICE.Evaluation;
 using ICE.Indexing;
 using ICE.Ingestion;
 using ICE.KnowledgeRepresentation;
+using ICE.Models;
 using ICE.Retrieval;
 using Npgsql;
 
@@ -12,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 var postgres = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required. See README.md \"Run locally\".");
+var modelService = builder.Configuration.GetSection("ModelService").Get<ModelServiceOptions>() ?? new ModelServiceOptions();
 
 // Add services to the container.
 
@@ -29,6 +31,11 @@ builder.Services.AddSingleton<IIngestionQueue, RabbitMqIngestionQueue>();
 builder.Services.AddSingleton<IKnowledgeStore, PostgresKnowledgeStore>();
 builder.Services.AddSingleton<IKnowledgeRepresentationService, HierarchyBuilder>();
 builder.Services.AddSingleton<IIndexManagementService, PostgresIndexManagementService>();
+builder.Services.AddHttpClient<IModelService, HttpModelService>(client =>
+{
+    client.BaseAddress = new Uri(modelService.BaseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(modelService.TimeoutSeconds);
+});
 builder.Services.AddSingleton<IIntelligentRetrievalService, ProgressiveRetrievalService>();
 builder.Services.AddSingleton<IContextOptimizationService, TokenBudgetContextOptimizationService>();
 builder.Services.AddSingleton<IContextMemoryService, InMemoryContextMemoryService>();

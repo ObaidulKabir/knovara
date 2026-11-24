@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace ICE.Api.Controllers;
 
 public record AskRequest(string SessionId, string Question, int TokenBudget = 2000);
+public record SearchRequest(string Question, RetrievalMode Mode = RetrievalMode.HybridRerank, int TopK = 5);
 
 [ApiController]
 [Route("api/retrieval")]
@@ -87,6 +88,21 @@ public sealed partial class RetrievalController : ControllerBase
             Reprocessed: false), ct);
 
         return Ok(contextPackage);
+    }
+
+    /// <summary>
+    /// Runs one retrieval mode with no caching and no context optimization, so eval/run_benchmark.py can
+    /// measure what each stage (lexical, semantic, their fusion, reranking) contributes on its own.
+    /// Not used by agents; see <see cref="Ask"/> for that.
+    /// </summary>
+    [HttpPost("search")]
+    public async Task<ActionResult<RetrievalResult>> Search(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        [FromBody] SearchRequest request,
+        CancellationToken ct)
+    {
+        var query = new RetrievalQuery(Guid.NewGuid().ToString("n"), tenantId, SessionId: "benchmark", request.Question, Mode: request.Mode, TopK: request.TopK);
+        return Ok(await _retrieval.RetrieveAsync(query, ct));
     }
 
     private async Task<bool> AllCurrentAsync(IReadOnlyList<EvidenceItem> evidence, string tenantId, CancellationToken ct)

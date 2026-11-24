@@ -8,6 +8,7 @@
     <Project Path="src/ICE.Indexing/ICE.Indexing.csproj" />
     <Project Path="src/ICE.Ingestion/ICE.Ingestion.csproj" />
     <Project Path="src/ICE.KnowledgeRepresentation/ICE.KnowledgeRepresentation.csproj" />
+    <Project Path="src/ICE.Models/ICE.Models.csproj" />
     <Project Path="src/ICE.Retrieval/ICE.Retrieval.csproj" />
   </Folder>
 </Solution>

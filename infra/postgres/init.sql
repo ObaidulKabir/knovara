@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
     summary           TEXT,
     original_content  TEXT,               -- exact source text; what the agent is finally given
     metadata          JSONB NOT NULL DEFAULT '{}',
-    embedding         vector(1536),       -- Phase 2
+    embedding         vector(384),        -- BAAI/bge-small-en-v1.5; dimensions must match services/model-service
+    embedding_model   TEXT,               -- which model produced embedding; NULL until Phase 2 embeds it
     search_tsv        tsvector GENERATED ALWAYS AS (
                           setweight(to_tsvector('english', coalesce(title, '')), 'B') ||
                           setweight(to_tsvector('english', coalesce(original_content, '')), 'A')
@@ -43,6 +44,10 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_resource ON knowledge_nodes (resource_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_parent ON knowledge_nodes (parent_node_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_search ON knowledge_nodes USING GIN (search_tsv);
+
+-- Cosine distance (<=>); vector_cosine_ops must match the operator ICE.Indexing's semantic search uses.
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_embedding ON knowledge_nodes
+    USING hnsw (embedding vector_cosine_ops);
 
 CREATE TABLE IF NOT EXISTS relationship_edges (
     from_node_id   TEXT NOT NULL REFERENCES knowledge_nodes(node_id) ON DELETE CASCADE,

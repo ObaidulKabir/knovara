@@ -21,10 +21,10 @@ public sealed partial class ResourcesController(
     IKnowledgeStore store,
     IIngestionQueue queue,
     IKnowledgeRepresentationService knowledge,
-    IContextMemoryService memory) : ControllerBase
+    IContextMemoryService memory,
+    IModelService models) : ControllerBase
 {
     private const string IndexVersion = "idx-v1";
-    private const string ModelVersion = "model-v1";
     private const int MaxUriLength = 2_048;
     private const int MaxErrorLength = 2_000;
 
@@ -72,7 +72,8 @@ public sealed partial class ResourcesController(
     {
         if (!IsContentHash(request.ContentHash)) return Problem(statusCode: 400, title: "contentHash must be 'sha256:' followed by 64 lowercase hex digits.");
 
-        return await store.CheckVersionAsync(tenantId, resourceId, request.ContentHash, ct) switch
+        var model = await models.GetInfoAsync(ct);
+        return await store.CheckVersionAsync(tenantId, resourceId, request.ContentHash, model.EmbeddingModel, ct) switch
         {
             VersionCheck.NotFound => NotFound(),
             VersionCheck.Unchanged => Ok(new VersionCheckResponse(Changed: false)),
@@ -104,7 +105,21 @@ public sealed partial class ResourcesController(
             return Problem(statusCode: 400, title: "Invalid extraction.", detail: ex.Message);
         }
 
-        var commit = await store.CommitVersionAsync(tenantId, resourceId, request.ContentHash, nodes, ct);
+        var model = await models.GetInfoAsync(ct);
+        var passages = nodes.Where(n => n.OriginalContent is not null).ToList();
+        var embeddings = new Dictionary<string, float[]>();
+        if (passages.Count > 0)
+        {
+            // Contextual embedding: the heading path goes in front of the passage text, the same way
+            // a human would read it with its surrounding context (system_architecture.md "Multi-Dimensional Indexing").
+            var vectors = await models.EmbedPassagesAsync(passages.Select(n => $"{n.Title}\n{n.OriginalContent}").ToList(), ct);
+            foreach (var (node, vector) in passages.Zip(vectors))
+            {
+                embeddings[node.NodeId] = vector;
+            }
+        }
+
+        var commit = await store.CommitVersionAsync(tenantId, resourceId, request.ContentHash, nodes, embeddings, model.EmbeddingModel, ct);
         if (commit is null) return NotFound();
 
         if (commit.Applied)
@@ -114,7 +129,7 @@ public sealed partial class ResourcesController(
                 await memory.PurgeSupersededAsync(tenantId, resourceId, commit.SupersededVersion, ct);
             }
 
-            var cacheKey = new CacheKey(resourceId, request.ContentHash, IndexVersion, ModelVersion, tenantId);
+            var cacheKey = new CacheKey(resourceId, request.ContentHash, IndexVersion, model.EmbeddingModel, tenantId);
             await memory.SetCachedDocumentKnowledgeAsync(cacheKey, nodes, ct);
         }
 

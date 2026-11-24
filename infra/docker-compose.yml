@@ -39,6 +39,24 @@ services:
       timeout: 5s
       retries: 10
 
+  model-service:
+    build:
+      context: ../services/model-service
+    environment:
+      # Fewer ONNX Runtime threads means smaller per-thread arena buffers; under sustained load
+      # (e.g. the benchmark) this container's memory climbed enough to be OOM-killed at the
+      # default (auto-detected) thread count on this machine's 2-4 visible cores.
+      MODEL_THREADS: "2"
+    ports:
+      - "${MODEL_SERVICE_HOST_PORT:-8090}:8000"
+    mem_limit: ${MODEL_SERVICE_MEM_LIMIT:-2200m}
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   api:
     build:
       context: ..
@@ -47,6 +65,7 @@ services:
       # The .NET runtime image has no Kerberos libraries, so don't let Npgsql try GSS encryption.
       ConnectionStrings__Postgres: "Host=postgres;Database=ice;Username=ice;Password=${POSTGRES_PASSWORD:-ice_dev_password};GSS Encryption Mode=Disable"
       RabbitMq__Host: "rabbitmq"
+      ModelService__BaseUrl: "http://model-service:8000"
       ASPNETCORE_URLS: "http://+:8080"
     ports:
       - "${API_HOST_PORT:-5000}:8080"
@@ -54,6 +73,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      model-service:
         condition: service_healthy
 
   document-processing-worker:
@@ -67,6 +88,8 @@ services:
       - sources:/sources:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    mem_limit: ${WORKER_MEM_LIMIT:-1800m}
+    restart: on-failure
     depends_on:
       rabbitmq:
         condition: service_healthy

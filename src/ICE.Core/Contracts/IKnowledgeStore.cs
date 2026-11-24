@@ -27,13 +27,24 @@ public interface IKnowledgeStore
     Task<ResourceReference?> GetResourceAsync(string tenantId, string resourceId, CancellationToken ct = default);
 
     /// <summary>
-    /// Compares a freshly computed content hash with the stored version. Unchanged marks the resource
-    /// ready so the extractor can stop before parsing; changed marks it processing.
+    /// Compares a freshly computed content hash with the stored version. The resource counts as unchanged
+    /// only if the hash matches and every passage is already embedded with <paramref name="embeddingModel"/>;
+    /// then it is marked ready so the extractor can stop before parsing. Otherwise it is marked processing.
     /// </summary>
-    Task<VersionCheck> CheckVersionAsync(string tenantId, string resourceId, string contentHash, CancellationToken ct = default);
+    Task<VersionCheck> CheckVersionAsync(string tenantId, string resourceId, string contentHash, string embeddingModel, CancellationToken ct = default);
 
-    /// <summary>Atomically replaces the resource's hierarchy with <paramref name="nodes"/> and records the new version.</summary>
-    Task<VersionCommit?> CommitVersionAsync(string tenantId, string resourceId, string contentHash, IReadOnlyList<KnowledgeNode> nodes, CancellationToken ct = default);
+    /// <summary>
+    /// Atomically replaces the resource's hierarchy with <paramref name="nodes"/>, stores each passage's
+    /// embedding from <paramref name="embeddings"/> (keyed by node id), and records the new version.
+    /// </summary>
+    Task<VersionCommit?> CommitVersionAsync(
+        string tenantId,
+        string resourceId,
+        string contentHash,
+        IReadOnlyList<KnowledgeNode> nodes,
+        IReadOnlyDictionary<string, float[]> embeddings,
+        string embeddingModel,
+        CancellationToken ct = default);
 
     Task<bool> MarkFailedAsync(string tenantId, string resourceId, string error, CancellationToken ct = default);
 

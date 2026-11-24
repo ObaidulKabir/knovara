@@ -19,6 +19,7 @@
     <ProjectReference Include="..\ICE.ContextOptimization\ICE.ContextOptimization.csproj" />
     <ProjectReference Include="..\ICE.ContextMemory\ICE.ContextMemory.csproj" />
     <ProjectReference Include="..\ICE.Evaluation\ICE.Evaluation.csproj" />
+    <ProjectReference Include="..\ICE.Models\ICE.Models.csproj" />
   </ItemGroup>
 
 </Project>
