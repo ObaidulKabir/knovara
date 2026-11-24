@@ -161,6 +161,13 @@ and ColBERT (2004.12832) — all ingested for tenant `acme`.
 
 ## Endpoints
 
+Interactive docs (Development only, same as `/openapi/v1.json` itself — not exposed by default in
+a non-Development environment): run the API as in "Run locally" below, then open
+http://localhost:5299/swagger. It renders the one spec `MapOpenApi` already serves, so the two can
+never drift apart. Every enum (`SourceType`, `RetrievalMode`, ...) is rewritten to the string values
+the API actually sends and expects (`"Document"`, `"Adaptive"`, ...) — the generator's own default
+would show them as integers with no listed values, which `"Try it out"` would get wrong.
+
 Every request carries an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads are filtered by it.
 How far that header is trusted depends on the "Authentication" setting below.
 

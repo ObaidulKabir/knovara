@@ -26,11 +26,39 @@ builder.Services.AddControllers()
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi(options => options.AddDocumentTransformer((document, _, _) =>
+builder.Services.AddOpenApi(options =>
 {
-    document.Info.Title = "Knovara API";
-    return Task.CompletedTask;
-}));
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Info.Title = "Knovara API";
+        return Task.CompletedTask;
+    });
+
+    // The schema generator reflects the CLR enum (an int) and does not consult AddJsonOptions'
+    // JsonStringEnumConverter above, so every enum here showed as "integer" with no listed values -
+    // actively wrong, since every enum (SourceType, RetrievalMode, ...) is sent and returned as its
+    // member name, e.g. "Document" or "Adaptive". Rewriting it here is what keeps Swagger's generated
+    // request bodies and "Try it out" usable instead of misleading.
+    options.AddSchemaTransformer((schema, context, _) =>
+    {
+        if (context.JsonTypeInfo.Type.IsEnum)
+        {
+            schema.Type = Microsoft.OpenApi.JsonSchemaType.String;
+            schema.Enum = Enum.GetNames(context.JsonTypeInfo.Type)
+                .Select(name => (System.Text.Json.Nodes.JsonNode)System.Text.Json.Nodes.JsonValue.Create(name))
+                .ToList();
+
+            // A property with e.g. "RetrievalMode Mode = RetrievalMode.Adaptive" otherwise shows the
+            // default as the ordinal 4 right next to the string values just rewritten above.
+            if (schema.Default is not null)
+            {
+                var ordinal = schema.Default.GetValue<int>();
+                schema.Default = System.Text.Json.Nodes.JsonValue.Create(Enum.GetName(context.JsonTypeInfo.Type, ordinal));
+            }
+        }
+        return Task.CompletedTask;
+    });
+});
 
 // Knovara pipeline services (see system_architecture.md "Core Components").
 // Context memory and evaluation are still in-memory (Phase 3 moves memory to Redis).
@@ -99,6 +127,15 @@ app.UseMiddleware<TenantAuthMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+
+    // Renders the JSON MapOpenApi already serves - no second spec generator, so the two can never
+    // drift apart. Scoped to Development, same as MapOpenApi: this is a developer tool, not a route
+    // this project's own no-public-API-surface-by-default posture wants exposed by default.
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/openapi/v1.json", "Knovara API v1");
+        options.RoutePrefix = "swagger";
+    });
 }
 
 app.UseAuthorization();
