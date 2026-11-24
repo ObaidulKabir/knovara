@@ -17,6 +17,9 @@ venv/
 .vscode/
 *.swp
 
+# Private brainstorming transcript; kept locally, never published
+chat history.docx
+
 # Worker source folder: only the samples are tracked
 sources/*
 !sources/samples/
