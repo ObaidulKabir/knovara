@@ -1,7 +1,5 @@
 {
   "BaseUrl": "http://localhost:5299",
   "TenantId": "acme",
-  "UseMcp": false,
-  "McpPort": 50052,
   "JwtToken": ""
 }

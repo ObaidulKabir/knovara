@@ -86,8 +86,6 @@ namespace Knovara.Desktop
                 obj["BaseUrl"] = baseUrl;
                 obj["TenantId"] = tenant;
                 obj["JwtToken"] = token;
-                if (obj["UseMcp"] == null) obj["UseMcp"] = false;
-                if (obj["McpPort"] == null) obj["McpPort"] = 50052;
 
                 var json = JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(ConfigPath, json);
