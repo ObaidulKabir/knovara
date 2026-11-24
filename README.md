@@ -106,12 +106,12 @@ any one of them so they can be compared.
 | `Lexical` | Postgres full-text search. Matches **any** of the question's terms and ranks passages by how many match and how close together. |
 | `Semantic` | Embedding similarity through pgvector (HNSW, cosine distance), filtered by tenant and embedding model. |
 | `Hybrid` | The top 30 lexical and top 30 semantic results merged with Reciprocal Rank Fusion. |
-| `HybridRerank` | The merged candidates (typically 30–40) reordered by a cross-encoder, which reads question and passage together. |
+| `HybridRerank` | The top 20 semantic and top 10 lexical results (up to 30 after removing duplicates) reordered by a cross-encoder, which reads question and passage together. |
 
 On the sample corpus, `Semantic` and `HybridRerank` both put a correct passage in the top 3 for
 90% of the benchmark questions, against 68% for `Lexical`, which mostly misses questions worded
 differently from the document. `Semantic` answers in about 30 ms; `HybridRerank` takes about
-2.5 s on CPU for a slightly better first result. See [eval/results](eval/results) and
+1.7 s on CPU for a slightly better first result. See [eval/results](eval/results) and
 system_architecture.md "Retrieval Strategy by Data Size" for how this should change as data grows.
 
 ### Model service
@@ -213,7 +213,7 @@ docker compose -f infra/docker-compose.yml down -v; docker compose -f infra/dock
 ## Next steps
 
 0. **Authentication.** The tenant currently comes from a header the caller sets, which is only safe behind a trusted gateway. The worker-facing endpoints (`version`, `nodes`, `failure`) should also require a worker credential. Add authentication middleware that derives the tenant from the verified credential and sets it where controllers read `TenantHeader`.
-1. **Phase 2 remainder:** section and document summaries (with a self-hosted LLM), and tier S1 of system_architecture.md "Retrieval Strategy by Data Size": rerank only the top 20 semantic and top 10 keyword results (about 1 s instead of 2.5 s), rerank only when semantic results look uncertain, a 200+ question benchmark and the distractor scaling test.
+1. **Phase 2 remainder:** section and document summaries (with a self-hosted LLM), and tier S1 of system_architecture.md "Retrieval Strategy by Data Size": rerank only when semantic results look uncertain, a 200+ question benchmark and the distractor scaling test.
 2. **Phase 3 — context memory:** replace `InMemoryContextMemoryService` with Redis, and persist evaluation metrics to the `task_metrics` table.
 3. **Phase 4 — code intelligence:** Tree-sitter parsing for `Code` sources.
 4. Harden the worker's URL fetching against DNS rebinding (resolve once and connect to the checked address).

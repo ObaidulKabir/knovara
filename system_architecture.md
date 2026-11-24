@@ -44,17 +44,17 @@ The pipeline above is really two paths that run at different times. A question n
 
 The ingest path makes knowledge cheap to keep; the query path makes repeat questions cheap to answer. They are measured separately (reprocessing rate vs. cache hit rate).
 
-## External Dependencies
+## Models
 
-Model providers are outside the system boundary and are reached only through provider-neutral adapters:
+Knovara runs its own models in a separate model service (`services/model-service`): open models on CPU, with no paid model APIs. Components reach it through one adapter interface, so a model can be swapped without changing them.
 
-| Provider | Used by | Purpose |
-|---|---|---|
-| Summarization LLM | Knowledge Representation | Section/chapter/document summaries |
-| Embedding model | Index Management | Semantic (vector) index |
-| Reranker (cross-encoder) | Intelligent Retrieval | Reranking the candidate set |
+| Model | Used by | Purpose | Current choice |
+|---|---|---|---|
+| Embedding model | Index Management, Intelligent Retrieval | Passage vectors (heading path + text) and question vectors | `BAAI/bge-small-en-v1.5`, 384 dimensions |
+| Reranker (cross-encoder) | Intelligent Retrieval | Reordering the candidate set | `Xenova/ms-marco-MiniLM-L-6-v2` |
+| Summarization LLM | Knowledge Representation | Section/chapter/document summaries | Not chosen yet; must also be a self-hosted open model |
 
-Every call is metered (tokens, latency, cost) by the Evaluation & Observability Service, since these calls are the main cost the system exists to reduce.
+Every call is measured (latency, and tokens where they apply) by the Evaluation & Observability Service. With no per-call fees, the cost to control is hardware: CPU time and memory per question and per ingested source.
 
 ## Core Components
 
@@ -67,7 +67,7 @@ Every call is metered (tokens, latency, cost) by the Evaluation & Observability 
 | **Intelligent Retrieval Service** | Plans queries, executes multi-index retrieval, reranks candidates, and progressively expands context only as needed. |
 | **Context Optimization Service** | Deduplicates evidence, applies token budgeting, selects the minimum sufficient evidence set, and assembles the final context package. |
 | **Context Memory Service** | Owns the document knowledge cache, retrieval/evidence cache, and session knowledge memory; purges entries for superseded source versions. |
-| **Model Provider Adapters** | Provider-neutral wrappers for the summarization LLM, embedding model and reranker; record model version and per-call cost. |
+| **Model Service Adapter** | Wraps the self-hosted model service (embeddings and reranking now, summaries later) behind one interface, and records which model produced each stored embedding. |
 | **Evaluation & Observability Service** | Tracks tokens, latency, LLM call count, recall, accuracy, citation correctness, and cache hit/reprocessing rates. |
 
 ## Format-Aware Processing
@@ -191,6 +191,7 @@ Phase 2 benchmark (`eval/run_benchmark.py`): 86 passages, 40 questions, bge-smal
 | Hybrid (RRF) | 0.80 | 0.74 | 24 ms |
 | Hybrid (RRF, ~60 candidates, one batch) + rerank | 0.90 | 0.84 | 6,046 ms |
 | Semantic top 20 + rerank (batches of 8, sorted by length) | 0.93 | 0.85 | ~1,000 ms rerank step (offline measurement) |
+| Semantic top 20 + lexical top 10 + rerank (live, after structure-aware chunking: 58 passages) | 0.90 | 0.85 | 1,694 ms |
 
 - RRF blends rankings without reading the passages; at this size it ranked worse than semantic search alone. When a rerank follows, merge the candidate pools and let the reranker order them; use RRF only on paths without a rerank.
 - Reranking ~60 candidates in one batch exhausted the model service's 2.2 GB memory limit. Batches of 8 sorted by length kept peak memory near 450 MB; more ONNX threads (2 → 8) did not reduce latency.
@@ -220,7 +221,7 @@ The tier boundaries above are rules of thumb. A **distractor scaling test** repl
 
 ### Rollout
 
-1. **Now (S0–S1):** merged semantic + keyword candidates with batched, length-sorted reranking; per-query escalation; tier configuration; question set expanded to 200+.
+1. **Now (S0–S1):** merged semantic + keyword candidates with batched, length-sorted reranking (done); per-query escalation; tier configuration; question set expanded to 200+.
 2. **Scaling test** up to 1M passages; set the thresholds from its results.
 3. **S2 features** once any tenant passes ~100k passages: coarse retrieval over document/section summaries (requires summaries at ingestion), true BM25, `halfvec`, query cache.
 4. **S3 infrastructure** only when a tenant approaches ~10M passages: dedicated engines, quantization, sharding.
@@ -243,7 +244,7 @@ The tier boundaries above are rules of thumb. A **distractor scaling test** repl
 
 | Component | Recommended technology |
 |---|---|
-| Core orchestration | .NET 8/9 Web API |
+| Core orchestration | .NET 10 Web API |
 | Document processing | Python workers, Docling |
 | Code parsing | Tree-sitter |
 | Semantic indexing | pgvector (initial), dedicated vector DB later if justified |
@@ -253,10 +254,10 @@ The tier boundaries above are rules of thumb. A **distractor scaling test** repl
 | Cache | Redis |
 | Original resource storage | `knowledge_nodes.original_content` in Postgres (initial); S3-compatible object storage once sources outgrow it |
 | Asynchronous processing | RabbitMQ or Kafka |
-| Embedding models | Provider-neutral embedding adapter |
-| Reranking | Cross-encoder reranker |
-| Summarization | Cost-effective LLM with batch processing |
-| Observability | OpenTelemetry + token/cost metrics |
+| Embedding models | Self-hosted open model through fastembed / ONNX Runtime on CPU (`bge-small-en-v1.5` initially) |
+| Reranking | Self-hosted cross-encoder (`ms-marco-MiniLM-L-6-v2` initially) |
+| Summarization | Self-hosted open LLM with batch processing (not chosen yet) |
+| Observability | OpenTelemetry + token, latency and hardware-use metrics |
 
 Guiding rule: do not deploy every component on day one. PostgreSQL alone (metadata + hierarchy + full-text + vector) can carry the first version; OpenSearch/Neo4j/dedicated vector DB are introduced only once scale and retrieval benchmarks justify them.
 

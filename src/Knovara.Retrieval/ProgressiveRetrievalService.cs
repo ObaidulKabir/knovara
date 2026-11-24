@@ -7,11 +7,13 @@ namespace Knovara.Retrieval;
 /// Retrieval across the four modes the benchmark compares (see eval/run_benchmark.py).
 /// RetrievalMode.HybridRerank is what /ask uses; the others exist to measure what each stage adds.
 /// Query understanding, coarse-to-fine escalation and context expansion are future phases — this
-/// runs one search pass per question, widened for RRF/rerank modes.
+/// runs one search pass per question, widened for the hybrid and rerank modes.
 /// </summary>
 public sealed class ProgressiveRetrievalService(IIndexManagementService index, IModelService models) : IIntelligentRetrievalService
 {
     private const int CandidatePoolSize = 30;
+    private const int RerankSemanticCandidates = 20;
+    private const int RerankLexicalCandidates = 10;
 
     public async Task<RetrievalResult> RetrieveAsync(RetrievalQuery query, CancellationToken ct = default)
     {
@@ -67,9 +69,19 @@ public sealed class ProgressiveRetrievalService(IIndexManagementService index, I
             .ToList();
     }
 
+    /// <summary>Pooled without RRF: the cross-encoder judges each candidate, and RRF ranked below semantic alone on the benchmark.</summary>
     private async Task<IReadOnlyList<EvidenceItem>> RerankAsync(RetrievalQuery query, CancellationToken ct)
     {
-        var candidates = await FuseAsync(query, CandidatePoolSize, ct);
+        var semanticTask = SemanticAsync(query, RerankSemanticCandidates, ct);
+        var lexicalTask = index.SearchLexicalAsync(query.Question, query.TenantId, RerankLexicalCandidates, ct);
+        await Task.WhenAll(semanticTask, lexicalTask);
+
+        var lexicalIds = (await lexicalTask).Select(item => item.NodeId).ToHashSet();
+        var semantic = (await semanticTask)
+            .Select(item => lexicalIds.Contains(item.NodeId) ? item with { RetrievedVia = IndexKind.Hybrid } : item)
+            .ToList();
+        var semanticIds = semantic.Select(item => item.NodeId).ToHashSet();
+        var candidates = semantic.Concat((await lexicalTask).Where(item => !semanticIds.Contains(item.NodeId))).ToList();
         if (candidates.Count == 0) return candidates;
 
         var scores = await models.RerankAsync(query.Question, candidates.Select(c => c.Content).ToList(), ct);

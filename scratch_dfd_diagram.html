@@ -77,13 +77,15 @@ svg .flow{font-size:11.5px;}
 
   <h2>Level 0 — Context Diagram</h2>
   <p class="sub">The whole system as a single process, bounded by the four parties
-    it exchanges data with. Model providers are outside the boundary: the system sends
-    them text and gets back summaries, vectors and relevance scores.</p>
+    it exchanges data with. The model service is drawn outside it because it is a
+    separate, swappable service, but Knovara runs it itself with open models on CPU
+    (bge-small embeddings, a MiniLM cross-encoder reranker) — no paid model APIs. The
+    system sends it text and gets back vectors and relevance scores; summaries are planned.</p>
 
   <figure>
     <div class="diagram-scroll">
 <svg viewBox="0 0 940 560" width="940" height="560" role="img"
-     aria-label="Context diagram: process 0, Knovara, receives source content from a Source Repository; receives authenticated requests and questions from an AI Agent and returns context packages, acknowledgements and session knowledge; sends text to Model Providers and receives summaries, vectors and scores; and answers metrics queries from a Metrics Consumer.">
+     aria-label="Context diagram: process 0, Knovara, receives source content from a Source Repository; receives authenticated requests and questions from an AI Agent and returns context packages, acknowledgements and session knowledge; sends text to the self-hosted Model Service and receives vectors, relevance scores and, later, summaries; and answers metrics queries from a Metrics Consumer.">
 
   <!-- external entity: Source Repository -->
   <rect x="40" y="60" width="220" height="80" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
@@ -91,11 +93,12 @@ svg .flow{font-size:11.5px;}
   <text x="150" y="113" text-anchor="middle" class="title" font-size="14">Repository</text>
   <text x="150" y="131" text-anchor="middle" class="flow" fill="var(--muted)">code · docs · web</text>
 
-  <!-- external entity: Model Providers -->
+  <!-- external entity: Model Service (self-hosted) -->
   <rect x="680" y="40" width="220" height="90" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
-  <text x="790" y="75" text-anchor="middle" class="title" font-size="14">Model Providers</text>
-  <text x="790" y="95" text-anchor="middle" class="flow" fill="var(--muted)">summarization LLM ·</text>
-  <text x="790" y="110" text-anchor="middle" class="flow" fill="var(--muted)">embeddings · reranker</text>
+  <text x="790" y="65" text-anchor="middle" class="title" font-size="14">Model Service</text>
+  <text x="790" y="85" text-anchor="middle" class="flow" fill="var(--muted)">self-hosted, open models</text>
+  <text x="790" y="102" text-anchor="middle" class="flow" fill="var(--muted)">embeddings · reranker</text>
+  <text x="790" y="119" text-anchor="middle" class="flow" fill="var(--muted)">summaries (planned)</text>
 
   <!-- external entity: AI Agent / Caller -->
   <rect x="680" y="220" width="220" height="120" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
@@ -151,14 +154,14 @@ svg .flow{font-size:11.5px;}
   <h2>Level 1 — System Decomposition</h2>
   <p class="sub">Six processes in three rows: ingest/index (write path), retrieve/deliver
     (read path), and memory/metrics (support path). The <b style="color:var(--fg)">AI
-    Agent / Caller</b> is drawn four times and <b style="color:var(--fg)">Model Providers</b>
+    Agent / Caller</b> is drawn four times and the <b style="color:var(--fg)">Model Service</b>
     twice — the same entity each time, placed next to each process it actually talks to,
     so no flow has to cross the whole page.</p>
 
   <figure>
     <div class="diagram-scroll">
 <svg viewBox="0 0 1150 980" width="1150" height="980" role="img"
-     aria-label="Level 1 data flow diagram with six processes — Ingest and Represent Source, Manage Multi-Index Store, Retrieve and Rank Evidence, Optimize and Deliver Context, Manage Context Memory, and Record and Report Metrics — four data stores, and the Source Repository, AI Agent, Model Providers and Metrics Consumer external entities connected to them. Process 3.0 reads the index store to search and the knowledge store to verify evidence.">
+     aria-label="Level 1 data flow diagram with six processes — Ingest and Represent Source, Manage Multi-Index Store, Retrieve and Rank Evidence, Optimize and Deliver Context, Manage Context Memory, and Record and Report Metrics — four data stores, and the Source Repository, AI Agent, self-hosted Model Service and Metrics Consumer external entities connected to them. Process 3.0 has the Model Service embed the question and rerank candidates, reads the index store to search, and reads the knowledge store to verify evidence.">
 
   <!-- ================= ROW 1 : write path ================= -->
   <rect x="30" y="80" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
@@ -184,12 +187,13 @@ svg .flow{font-size:11.5px;}
 
   <rect x="890" y="80" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
   <path d="M1082,87 L1082,80 L1089,80 Z" fill="var(--accent)"/>
-  <text x="990" y="110" text-anchor="middle" class="title" font-size="13">Model Providers</text>
-  <text x="990" y="128" text-anchor="middle" class="flow" fill="var(--muted)">LLM · embeddings</text>
+  <text x="990" y="104" text-anchor="middle" class="title" font-size="13">Model Service</text>
+  <text x="990" y="121" text-anchor="middle" class="flow" fill="var(--muted)">self-hosted, open models</text>
+  <text x="990" y="137" text-anchor="middle" class="flow" fill="var(--muted)">embeddings · summaries</text>
 
   <path d="M480,80 L480,40 L1040,40 L1040,78" fill="none" stroke="currentColor" stroke-width="1.75"
         marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-  <text x="760" y="32" text-anchor="middle" class="flow" fill="var(--muted)">summarize (section text ↔ summaries)</text>
+  <text x="760" y="32" text-anchor="middle" class="flow" fill="var(--muted)">summarize (section text ↔ summaries) — planned</text>
 
   <line x1="820" y1="105" x2="888" y2="105" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
   <text x="826" y="85" class="flow" fill="var(--muted)">text to</text>
@@ -285,14 +289,15 @@ svg .flow{font-size:11.5px;}
   <text x="324" y="364" text-anchor="end" class="flow" fill="var(--muted)">verify: current version</text>
   <text x="324" y="377" text-anchor="end" class="flow" fill="var(--muted)">+ original passage</text>
 
-  <!-- Model Providers B: reranking for P3 -->
+  <!-- Model Service B: query embedding and reranking for P3 -->
   <rect x="30" y="505" width="200" height="60" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
   <path d="M222,512 L222,505 L229,505 Z" fill="var(--accent)"/>
-  <text x="130" y="532" text-anchor="middle" class="title" font-size="13">Model Providers</text>
-  <text x="130" y="550" text-anchor="middle" class="flow" fill="var(--muted)">reranker</text>
+  <text x="130" y="527" text-anchor="middle" class="title" font-size="13">Model Service</text>
+  <text x="130" y="545" text-anchor="middle" class="flow" fill="var(--muted)">query embedding · reranker</text>
   <line x1="230" y1="518" x2="298" y2="518" stroke="currentColor" stroke-width="1.75"
         marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-  <text x="236" y="511" class="flow" fill="var(--muted)">rerank</text>
+  <text x="236" y="511" class="flow" fill="var(--muted)">embed</text>
+  <text x="236" y="533" class="flow" fill="var(--muted)">rerank</text>
 
   <!-- ================= backbone: P1 writes seed straight down to P5 ================= -->
   <path d="M520,135 L535,135 L535,735 L520,735" fill="none" stroke="var(--accent)" stroke-width="1.75"
