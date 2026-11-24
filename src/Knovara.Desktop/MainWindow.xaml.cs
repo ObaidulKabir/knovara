@@ -23,6 +23,17 @@ namespace Knovara.Desktop
         public string DisplayText => $"{Title} (~{EstimatedTokens} tokens) - {Source}";
     }
 
+    /// <summary>Mirrors the JSON shape of ResourceReference (GET/DELETE api/resources) for the Documents tab's list.</summary>
+    public class ManagedResourceItem
+    {
+        public string ResourceId { get; set; } = string.Empty;
+        public string Uri { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? SourceVersion { get; set; }
+        public string DisplayText => $"{Uri}   [{Type}] - {Status}{(SourceVersion is null ? "" : $"  (v:{SourceVersion[..Math.Min(19, SourceVersion.Length)]}…)")}";
+    }
+
     public partial class MainWindow : Window
     {
         private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -36,6 +47,7 @@ namespace Knovara.Desktop
         private readonly string _jwtToken;
         private readonly HttpClient _http;
         private readonly ObservableCollection<ContextDocItem> _contextDocuments = new();
+        private readonly ObservableCollection<ManagedResourceItem> _managedResources = new();
 
         public MainWindow(string baseUrl, string tenantId, string jwtToken)
         {
@@ -61,6 +73,9 @@ namespace Knovara.Desktop
 
             ContextDocsListBox.ItemsSource = _contextDocuments;
             UpdateContextSummary();
+
+            DocumentsListBox.ItemsSource = _managedResources;
+            _ = RefreshDocumentsAsync(); // tenant-scoped, so it's safe to load as soon as we're connected
         }
 
         #region Context Documents Management
@@ -215,16 +230,91 @@ namespace Knovara.Desktop
             MessageBox.Show($"Resource '{resourceId}' pinned to current context.", "Pinned to Context", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
+        #endregion // Context Documents Management
+
+        #region Document Management (tenant-scoped resource list)
+
+        private async void OnRefreshDocumentsClicked(object sender, RoutedEventArgs e) => await RefreshDocumentsAsync();
+
+        private async Task RefreshDocumentsAsync()
+        {
+            SetBusy("Loading documents for this tenant...");
+            try
+            {
+                var response = await _http.GetAsync("api/resources");
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var items = JsonSerializer.Deserialize<List<ManagedResourceItem>>(content, JsonOptions) ?? [];
+                    _managedResources.Clear();
+                    foreach (var item in items) _managedResources.Add(item);
+                    DocumentsSummaryText.Text = $" {_managedResources.Count} document(s) for tenant '{_tenantId}'";
+                    SetStatus($"Loaded {_managedResources.Count} document(s).");
+                }
+                else
+                {
+                    DocumentsSummaryText.Text = $" Could not load: {(int)response.StatusCode} {response.ReasonPhrase}";
+                    SetStatus($"Document list error: {(int)response.StatusCode}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                DocumentsSummaryText.Text = $" Could not reach API: {ex.Message}";
+                SetStatus($"Document list failed: {ex.Message}");
+            }
+        }
+
+        private async void OnDeleteDocumentClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn || btn.Tag is not string resourceId) return;
+            var item = _managedResources.FirstOrDefault(d => d.ResourceId == resourceId);
+
+            var confirm = MessageBox.Show(
+                $"Delete '{item?.Uri ?? resourceId}' and everything extracted from it?\n\nThis removes its passages, embeddings and relationships. It cannot be undone.",
+                "Confirm Delete", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            SetBusy($"Deleting {resourceId}...");
+            try
+            {
+                var response = await _http.DeleteAsync($"api/resources/{resourceId}");
+                if (response.IsSuccessStatusCode)
+                {
+                    if (item is not null) _managedResources.Remove(item);
+                    DocumentsSummaryText.Text = $" {_managedResources.Count} document(s) for tenant '{_tenantId}'";
+                    SetStatus($"Deleted {resourceId}.");
+                }
+                else if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    // Already gone - e.g. deleted from another session. Drop it locally and move on.
+                    if (item is not null) _managedResources.Remove(item);
+                    SetStatus($"{resourceId} was already deleted.");
+                }
+                else
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Delete failed ({(int)response.StatusCode}): {content}", "Delete Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    SetStatus($"Delete failed: {(int)response.StatusCode}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Could not reach API: {ex.Message}", "Delete Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                SetStatus($"Delete failed: {ex.Message}");
+            }
+        }
+
+        #endregion // Document Management
+
         private void UpdateContextSummary()
         {
             var totalTokens = _contextDocuments.Sum(d => d.EstimatedTokens);
             ContextSummaryText.Text = $" {_contextDocuments.Count} document(s) attached (~{totalTokens} tokens)";
-            AskButton.Content = _contextDocuments.Count > 0 
+            AskButton.Content = _contextDocuments.Count > 0
                 ? $"Ask Knovara ({_contextDocuments.Count} Doc{( _contextDocuments.Count > 1 ? "s" : "" )} in Context)"
                 : "Ask Knovara (Corpus Search)";
         }
-
-        #endregion
 
         #region Operations (Ask, Search, Ingest, Status)
 

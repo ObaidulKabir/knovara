@@ -62,6 +62,29 @@ public sealed partial class ResourcesController(
         return resource is null ? NotFound() : Ok(resource);
     }
 
+    /// <summary>Every resource registered for the caller's tenant - the document-management panel's list view.</summary>
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyList<ResourceReference>>> List(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        CancellationToken ct)
+    {
+        return Ok(await store.ListResourcesAsync(tenantId, ct));
+    }
+
+    /// <summary>
+    /// Deletes a resource and everything derived from it (knowledge, embeddings, relationships - all
+    /// cascade from the one row). Does not cancel a job already queued for it; the worker's own calls
+    /// against a deleted resource already fail with 404, the same as any other missing resource.
+    /// </summary>
+    [HttpDelete("{resourceId}")]
+    public async Task<IActionResult> Delete(
+        [FromHeader(Name = TenantHeader.Name)] string tenantId,
+        string resourceId,
+        CancellationToken ct)
+    {
+        return await store.DeleteResourceAsync(tenantId, resourceId, ct) ? NoContent() : NotFound();
+    }
+
     /// <summary>Called by the worker after hashing the fetched source, before parsing it.</summary>
     [HttpPost("{resourceId}/version")]
     public async Task<ActionResult<VersionCheckResponse>> CheckVersion(

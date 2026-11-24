@@ -40,6 +40,29 @@ public sealed class PostgresKnowledgeStore(NpgsqlDataSource dataSource) : IKnowl
         return await reader.ReadAsync(ct) ? ReadResource(reader) : null;
     }
 
+    public async Task<IReadOnlyList<ResourceReference>> ListResourcesAsync(string tenantId, CancellationToken ct = default)
+    {
+        await using var cmd = dataSource.CreateCommand(
+            $"SELECT {ResourceColumns} FROM resources WHERE tenant_id = @tenant ORDER BY updated_at DESC");
+        cmd.Parameters.AddWithValue("tenant", tenantId);
+
+        var resources = new List<ResourceReference>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            resources.Add(ReadResource(reader));
+        }
+        return resources;
+    }
+
+    public async Task<bool> DeleteResourceAsync(string tenantId, string resourceId, CancellationToken ct = default)
+    {
+        await using var cmd = dataSource.CreateCommand("DELETE FROM resources WHERE resource_id = @id AND tenant_id = @tenant");
+        cmd.Parameters.AddWithValue("id", resourceId);
+        cmd.Parameters.AddWithValue("tenant", tenantId);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+    }
+
     public async Task<VersionCheck> CheckVersionAsync(string tenantId, string resourceId, string contentHash, string embeddingModel, CancellationToken ct = default)
     {
         await using var cmd = dataSource.CreateCommand($"""

@@ -26,6 +26,15 @@ public interface IKnowledgeStore
 
     Task<ResourceReference?> GetResourceAsync(string tenantId, string resourceId, CancellationToken ct = default);
 
+    /// <summary>Every resource registered for the tenant, most recently updated first. The document-management panel's source of truth.</summary>
+    Task<IReadOnlyList<ResourceReference>> ListResourcesAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes the resource and its entire knowledge hierarchy (knowledge_nodes and relationship_edges
+    /// cascade from the FK in init.sql). Returns false if it did not exist for this tenant.
+    /// </summary>
+    Task<bool> DeleteResourceAsync(string tenantId, string resourceId, CancellationToken ct = default);
+
     /// <summary>
     /// Compares a freshly computed content hash with the stored version. The resource counts as unchanged
     /// only if the hash matches and every passage is already embedded with <paramref name="embeddingModel"/>;
