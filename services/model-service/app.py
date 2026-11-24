@@ -49,7 +49,7 @@ reranker = TextCrossEncoder(RERANK_MODEL, cache_dir=CACHE_DIR, threads=THREADS)
 DIMENSIONS = len(next(iter(embedder.passage_embed(["probe"]))))
 logger.info("ready: %d-dimensional embeddings", DIMENSIONS)
 
-app = FastAPI(title="ICE Model Service")
+app = FastAPI(title="Knovara Model Service")
 
 
 def by_length(texts: list[str], infer) -> list:

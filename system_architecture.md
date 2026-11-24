@@ -1,6 +1,6 @@
-# System Architecture — Intelligent Context Engine (ICRO)
+# System Architecture — Knovara
 
-This document describes the technical architecture of **ICRO**, a multi-stage pipeline that converts large information sources (codebases, books, PDFs, web resources) into persistent, structured knowledge and serves AI agents the minimum sufficient evidence for a given task.
+This document describes the technical architecture of **Knovara**, a multi-stage pipeline that converts large information sources (codebases, books, PDFs, web resources) into persistent, structured knowledge and serves AI agents the minimum sufficient evidence for a given task.
 
 ## Design Principle
 

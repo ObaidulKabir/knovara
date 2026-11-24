@@ -1,6 +1,6 @@
-# ICE — Intelligent Context Engine (ICRO)
+# Knovara
 
-Application for the Intelligent Context Engine described in
+Application for **Knovara** (knovara.net), the context retrieval and optimization engine described in
 [business_architecture.md](business_architecture.md), [system_architecture.md](system_architecture.md),
 and [system_specifications.md](system_specifications.md).
 
@@ -22,16 +22,16 @@ built yet.
 
 ```
 src/
-  ICE.Api                      API gateway (ASP.NET Core Web API)
-  ICE.Core                     Shared domain models + service contracts
-  ICE.Ingestion                RabbitMQ ingestion queue
-  ICE.KnowledgeRepresentation  Hierarchy validation + Postgres Resource & Knowledge Store (D1)
-  ICE.Indexing                 Postgres full-text and pgvector search over stored passages
-  ICE.Retrieval                Intelligent Retrieval Service (lexical, semantic, hybrid, rerank)
-  ICE.Models                   Client for the model service (embeddings, reranking)
-  ICE.ContextOptimization      Context Optimization Service
-  ICE.ContextMemory            Context Memory Service (in-memory until Phase 3)
-  ICE.Evaluation               Evaluation & Observability Service (in-memory)
+  Knovara.Api                      API gateway (ASP.NET Core Web API)
+  Knovara.Core                     Shared domain models + service contracts
+  Knovara.Ingestion                RabbitMQ ingestion queue
+  Knovara.KnowledgeRepresentation  Hierarchy validation + Postgres Resource & Knowledge Store (D1)
+  Knovara.Indexing                 Postgres full-text and pgvector search over stored passages
+  Knovara.Retrieval                Intelligent Retrieval Service (lexical, semantic, hybrid, rerank)
+  Knovara.Models                   Client for the model service (embeddings, reranking)
+  Knovara.ContextOptimization      Context Optimization Service
+  Knovara.ContextMemory            Context Memory Service (in-memory until Phase 3)
+  Knovara.Evaluation               Evaluation & Observability Service (in-memory)
 workers/
   document-processing          Python/Docling extraction worker (RabbitMQ consumer)
 services/
@@ -161,7 +161,7 @@ docker compose -f infra/docker-compose.yml up -d --build postgres rabbitmq model
 ```
 
 ```powershell
-dotnet run --project src/ICE.Api --urls http://0.0.0.0:5299
+dotnet run --project src/Knovara.Api --urls http://0.0.0.0:5299
 ```
 
 `appsettings.Development.json` points the API at Postgres on port 5442, RabbitMQ on 5672 and the
@@ -169,7 +169,7 @@ model service on 8090.
 Then start the worker, pointed at the API on the host:
 
 ```powershell
-$env:ICE_API_BASE_URL = "http://host.docker.internal:5299"; docker compose -f infra/docker-compose.yml up -d --build document-processing-worker
+$env:KNOVARA_API_BASE_URL = "http://host.docker.internal:5299"; docker compose -f infra/docker-compose.yml up -d --build document-processing-worker
 ```
 
 The first worker build takes several minutes: it installs CPU-only PyTorch and Docling and
@@ -177,11 +177,11 @@ downloads Docling's layout and table models into the image.
 
 ### Adding source files
 
-The worker reads local sources from the `ice_sources` Docker volume (mounted at `/sources`),
+The worker reads local sources from the `knovara_sources` Docker volume (mounted at `/sources`),
 which avoids depending on Docker Desktop's host file sharing. Copy files into it with:
 
 ```powershell
-tar -C sources -cf - . | docker run --rm -i -v ice_sources:/sources alpine tar -xf - -C /sources
+tar -C sources -cf - . | docker run --rm -i -v knovara_sources:/sources alpine tar -xf - -C /sources
 ```
 
 Then ingest them by their path inside that folder, e.g. `samples/payment-service-guide.md`.

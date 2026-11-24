@@ -1,10 +1,11 @@
-# System Specifications — Intelligent Context Engine (ICRO)
+# System Specifications — Knovara
 
-This document specifies the **Intelligent Context Engine** (working name: **ICRO — Intelligent Context Retrieval and Optimization**), as defined in the project brainstorming session.
+This document specifies **Knovara**, an intelligent context retrieval and optimization engine, as defined in the project brainstorming session.
 
 ## Identity & Role
 
-- **Name**: ICRO / Intelligent Context Engine
+- **Name**: Knovara
+- **Domain**: knovara.net
 - **Type**: Provider-neutral knowledge processing and context optimization infrastructure for AI agents
 - **Primary Role**: Transform large, heterogeneous information sources (codebases, books, PDFs, websites, documents) into persistent, structured, searchable, reusable knowledge, and deliver the minimum sufficient evidence an agent needs to reason correctly — without repeatedly reprocessing the original source.
 - **Positioning**: An infrastructure capability consumed by any AI agent, not a single-product RAG feature.
@@ -125,7 +126,7 @@ The document cache is a disposable hot copy of the Resource & Knowledge Store, n
 | Cache hit rate | How much previous work is reused |
 | Reprocessing rate | How often unchanged resources are processed again |
 
-**Comparison baselines**: (1) agent reads raw source, (2) standard RAG (chunking + embeddings), (3) advanced RAG (hierarchical indexing + hybrid retrieval + reranking), (4) ICRO (advanced retrieval + persistent knowledge + evidence memory + context optimization). Run identical question sets against codebases, books, and web resources, including repeated-question and changed-source scenarios. Primary measure: tokens and time **per successfully completed task**, not chunk count retrieved.
+**Comparison baselines**: (1) agent reads raw source, (2) standard RAG (chunking + embeddings), (3) advanced RAG (hierarchical indexing + hybrid retrieval + reranking), (4) Knovara (advanced retrieval + persistent knowledge + evidence memory + context optimization). Run identical question sets against codebases, books, and web resources, including repeated-question and changed-source scenarios. Primary measure: tokens and time **per successfully completed task**, not chunk count retrieved.
 
 ## Open Decisions (resolved direction)
 

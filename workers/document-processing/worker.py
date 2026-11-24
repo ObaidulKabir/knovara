@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("document-processing-worker")
 
 RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
-API_BASE_URL = os.environ.get("ICE_API_BASE_URL", "http://localhost:5000")
+API_BASE_URL = os.environ.get("KNOVARA_API_BASE_URL", "http://localhost:5000")
 QUEUE_NAME = os.environ.get("INGESTION_QUEUE", "ingestion.requests")
 SOURCE_ROOT = Path(os.environ.get("SOURCE_ROOT", "/sources"))
 MAX_SOURCE_BYTES = int(os.environ.get("MAX_SOURCE_BYTES", str(50 * 1024 * 1024)))

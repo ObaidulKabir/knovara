@@ -1,6 +1,6 @@
-# Business Architecture — Intelligent Context Engine (ICRO)
+# Business Architecture — Knovara
 
-This document captures the business-level architecture for **ICRO (Intelligent Context Retrieval and Optimization)**, also referred to as the **Intelligent Context Engine**: a provider-neutral knowledge processing and context optimization infrastructure for AI agents.
+This document captures the business-level architecture for **Knovara** (knovara.net), an intelligent context retrieval and optimization engine: a provider-neutral knowledge processing and context optimization infrastructure for AI agents.
 
 ## Problem Statement
 

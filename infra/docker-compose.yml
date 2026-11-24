@@ -1,19 +1,19 @@
-name: ice
+name: knovara
 
 services:
   postgres:
     build:
       context: ./postgres
     environment:
-      POSTGRES_DB: ice
-      POSTGRES_USER: ice
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ice_dev_password}
+      POSTGRES_DB: knovara
+      POSTGRES_USER: knovara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-knovara_dev_password}
     ports:
       - "${POSTGRES_HOST_PORT:-5442}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ice -d ice"]
+      test: ["CMD-SHELL", "pg_isready -U knovara -d knovara"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -60,10 +60,10 @@ services:
   api:
     build:
       context: ..
-      dockerfile: src/ICE.Api/Dockerfile
+      dockerfile: src/Knovara.Api/Dockerfile
     environment:
       # The .NET runtime image has no Kerberos libraries, so don't let Npgsql try GSS encryption.
-      ConnectionStrings__Postgres: "Host=postgres;Database=ice;Username=ice;Password=${POSTGRES_PASSWORD:-ice_dev_password};GSS Encryption Mode=Disable"
+      ConnectionStrings__Postgres: "Host=postgres;Database=knovara;Username=knovara;Password=${POSTGRES_PASSWORD:-knovara_dev_password};GSS Encryption Mode=Disable"
       RabbitMq__Host: "rabbitmq"
       ModelService__BaseUrl: "http://model-service:8000"
       ASPNETCORE_URLS: "http://+:8080"
@@ -82,7 +82,7 @@ services:
       context: ../workers/document-processing
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
-      ICE_API_BASE_URL: "${ICE_API_BASE_URL:-http://api:8080}"
+      KNOVARA_API_BASE_URL: "${KNOVARA_API_BASE_URL:-http://api:8080}"
       SOURCE_ROOT: "/sources"
     volumes:
       - sources:/sources:ro

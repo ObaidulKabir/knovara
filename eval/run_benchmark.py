@@ -1,4 +1,4 @@
-"""Retrieval benchmark for the Intelligent Context Engine.
+"""Retrieval benchmark for Knovara.
 
 Asks every question in questions.json through POST /api/retrieval/search in each
 retrieval mode and reports, per mode and per question kind:
@@ -26,7 +26,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-MODES = ["Lexical", "Semantic", "Hybrid", "HybridRerank"]  # must match ICE.Core.Models.RetrievalMode exactly
+MODES = ["Lexical", "Semantic", "Hybrid", "HybridRerank"]  # must match Knovara.Core.Models.RetrievalMode exactly
 CUTOFFS = [1, 3, 5, 10]
 
 

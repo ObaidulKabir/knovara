@@ -1,4 +1,4 @@
--- Schema for the Intelligent Context Engine (ICRO), Phase 1.
+-- Schema for Knovara.
 -- Runs once, when the Postgres volume is first created. After changing it,
 -- recreate the volume: docker compose -f infra/docker-compose.yml down -v
 
@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_resource ON knowledge_nodes (reso
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_parent ON knowledge_nodes (parent_node_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_search ON knowledge_nodes USING GIN (search_tsv);
 
--- Cosine distance (<=>); vector_cosine_ops must match the operator ICE.Indexing's semantic search uses.
+-- Cosine distance (<=>); vector_cosine_ops must match the operator Knovara.Indexing's semantic search uses.
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_embedding ON knowledge_nodes
     USING hnsw (embedding vector_cosine_ops);
 

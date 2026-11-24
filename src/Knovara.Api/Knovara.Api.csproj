@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Knovara.Core\Knovara.Core.csproj" />
+    <ProjectReference Include="..\Knovara.Ingestion\Knovara.Ingestion.csproj" />
+    <ProjectReference Include="..\Knovara.KnowledgeRepresentation\Knovara.KnowledgeRepresentation.csproj" />
+    <ProjectReference Include="..\Knovara.Indexing\Knovara.Indexing.csproj" />
+    <ProjectReference Include="..\Knovara.Retrieval\Knovara.Retrieval.csproj" />
+    <ProjectReference Include="..\Knovara.ContextOptimization\Knovara.ContextOptimization.csproj" />
+    <ProjectReference Include="..\Knovara.ContextMemory\Knovara.ContextMemory.csproj" />
+    <ProjectReference Include="..\Knovara.Evaluation\Knovara.Evaluation.csproj" />
+    <ProjectReference Include="..\Knovara.Models\Knovara.Models.csproj" />
+  </ItemGroup>
+
+</Project>

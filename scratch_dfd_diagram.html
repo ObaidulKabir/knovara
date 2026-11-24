@@ -1,4 +1,4 @@
-<title>ICRO Data Flow Diagrams</title>
+<title>Knovara Data Flow Diagrams</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* layout concept: Level 0 is one process ringed by its three external entities;
@@ -58,7 +58,7 @@ svg .flow{font-size:11.5px;}
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 
 <div class="wrap">
-  <p class="kicker">ICE / ICRO</p>
+  <p class="kicker">Knovara</p>
   <h1>Data Flow Diagrams</h1>
   <p class="lede">Gane–Sarson notation: rounded boxes are processes, sharp-cornered
     boxes are external entities, open two-line shapes are data stores, and every
@@ -83,7 +83,7 @@ svg .flow{font-size:11.5px;}
   <figure>
     <div class="diagram-scroll">
 <svg viewBox="0 0 940 560" width="940" height="560" role="img"
-     aria-label="Context diagram: process 0, the Intelligent Context Engine, receives source content from a Source Repository; receives authenticated requests and questions from an AI Agent and returns context packages, acknowledgements and session knowledge; sends text to Model Providers and receives summaries, vectors and scores; and answers metrics queries from a Metrics Consumer.">
+     aria-label="Context diagram: process 0, Knovara, receives source content from a Source Repository; receives authenticated requests and questions from an AI Agent and returns context packages, acknowledgements and session knowledge; sends text to Model Providers and receives summaries, vectors and scores; and answers metrics queries from a Metrics Consumer.">
 
   <!-- external entity: Source Repository -->
   <rect x="40" y="60" width="220" height="80" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
@@ -111,8 +111,8 @@ svg .flow{font-size:11.5px;}
   <rect x="340" y="220" width="220" height="120" rx="60" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
   <line x1="340" y1="250" x2="560" y2="250" stroke="var(--accent)"/>
   <text x="450" y="242" text-anchor="middle" class="num" font-size="15">0</text>
-  <text x="450" y="280" text-anchor="middle" class="title" font-size="14">Intelligent Context</text>
-  <text x="450" y="298" text-anchor="middle" class="title" font-size="14">Engine (ICRO)</text>
+  <text x="450" y="282" text-anchor="middle" class="title" font-size="15">Knovara</text>
+  <text x="450" y="300" text-anchor="middle" class="flow" fill="var(--muted)">context engine</text>
 
   <!-- flows -->
   <path d="M260,100 L300,100 L300,260 L338,260" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
@@ -393,6 +393,6 @@ svg .flow{font-size:11.5px;}
     source is new or changed (1.0, 2.0), two that run on every question (3.0, 4.0), and
     two supporting processes that make the first four cheaper over time (5.0, 6.0). The
     stores map directly onto <span style="color:var(--fg)">infra/postgres/init.sql</span>
-    (D1/D2) and the <span style="color:var(--fg)">ICE.ContextMemory</span> /
-    <span style="color:var(--fg)">ICE.Evaluation</span> services (D3/D4).</p>
+    (D1/D2) and the <span style="color:var(--fg)">Knovara.ContextMemory</span> /
+    <span style="color:var(--fg)">Knovara.Evaluation</span> services (D3/D4).</p>
 </div>
