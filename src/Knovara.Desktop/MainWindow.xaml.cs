@@ -22,6 +22,28 @@ namespace Knovara.Desktop
         public string Source { get; set; } = string.Empty;
         public int EstimatedTokens => Math.Max(1, Content.Length / 4);
         public string DisplayText => $"{Title} (~{EstimatedTokens} tokens) - {Source}";
+
+        private bool IsFile => Source.Length > 2 && Path.IsPathRooted(Source);
+
+        /// <summary>File name for files (the title of a folder-attached file is its relative path); the title otherwise.</summary>
+        public string Name => IsFile ? Path.GetFileName(Source) : Title;
+
+        /// <summary>The containing folder for files, so same-named files in different folders are distinguishable.</summary>
+        public string Location => IsFile ? (Path.GetDirectoryName(Source) ?? Source) : Source;
+
+        public string TokensText => EstimatedTokens >= 1000 ? $"~{EstimatedTokens / 1000.0:0.#}k tok" : $"~{EstimatedTokens} tok";
+
+        public string PreviewText => Content.Length <= 400 ? Content : Content[..400] + "…";
+
+        public string Icon => !IsFile ? "✏️" : Path.GetExtension(Source).ToLowerInvariant() switch
+        {
+            ".md" or ".markdown" or ".txt" or ".rst" or ".log" => "📝",
+            ".json" or ".yaml" or ".yml" or ".xml" or ".toml" or ".ini" => "🧾",
+            ".csv" or ".tsv" => "📊",
+            ".html" or ".htm" => "🌐",
+            ".cs" or ".py" or ".js" or ".ts" or ".java" or ".go" or ".sql" => "💻",
+            _ => "📄"
+        };
     }
 
     /// <summary>Mirrors the JSON shape of ResourceReference (GET/DELETE api/resources) for the Documents tab's list.</summary>
@@ -83,90 +105,179 @@ namespace Knovara.Desktop
 
         #region Context Documents Management
 
+        private Action? _undoAction;
+
         private void OnBrowseDocumentClicked(object sender, RoutedEventArgs e)
         {
+            var patterns = string.Join(";", FolderScanner.TextExtensions.Select(x => "*" + x));
             var dialog = new OpenFileDialog
             {
-                Title = "Select Document to Add to Context",
-                Filter = "Text & Markdown (*.txt;*.md;*.json;*.csv;*.cs;*.yaml;*.yml;*.xml;*.html)|*.txt;*.md;*.json;*.csv;*.cs;*.yaml;*.yml;*.xml;*.html|All Files (*.*)|*.*",
+                Title = "Select Documents to Add to Context",
+                Filter = $"Text, code & data files ({patterns})|{patterns}|All Files (*.*)|*.*",
                 Multiselect = true
             };
 
-            if (dialog.ShowDialog() == true)
-            {
-                var attached = new List<string>();
-                foreach (var fileName in dialog.FileNames)
-                {
-                    try
-                    {
-                        var content = File.ReadAllText(fileName);
-                        var title = Path.GetFileName(fileName);
-                        if (string.IsNullOrWhiteSpace(content))
-                        {
-                            MessageBox.Show($"'{title}' is empty, so there is nothing to attach.", "Empty File", MessageBoxButton.OK, MessageBoxImage.Warning);
-                            continue;
-                        }
-
-                        _contextDocuments.Add(new ContextDocItem
-                        {
-                            Title = title,
-                            Content = content,
-                            Source = fileName
-                        });
-                        attached.Add(title);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Could not read file '{fileName}': {ex.Message}", "File Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    }
-                }
-
-                UpdateContextSummary();
-                if (attached.Count > 0)
-                {
-                    // The other pin actions confirm; without this it looked like nothing had happened,
-                    // and "Add Typed Note" cannot attach a browsed file because it only reads the text boxes.
-                    MessageBox.Show($"Attached to context: {string.Join(", ", attached)}", "Attached to Context",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-            }
+            if (dialog.ShowDialog() == true) AttachFiles(dialog.FileNames);
         }
 
         private void OnAttachFolderClicked(object sender, RoutedEventArgs e)
         {
             var dialog = new OpenFolderDialog { Title = "Select a Folder to Attach to Context" };
-            if (dialog.ShowDialog() != true) return;
+            if (dialog.ShowDialog() == true) AttachFolder(dialog.FolderName);
+        }
 
+        /// <summary>Attaches individually chosen or dropped files; reports (inline) anything it could not use.</summary>
+        private void AttachFiles(IEnumerable<string> paths)
+        {
+            var known = _contextDocuments.Select(d => d.Source).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var options = new FolderScanOptions();
+            var added = new List<ContextDocItem>();
+            var skipped = new Dictionary<string, int>();
+            void Skip(string reason) => skipped[reason] = skipped.GetValueOrDefault(reason) + 1;
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    if (known.Contains(path)) { Skip("already attached"); continue; }
+                    if (new FileInfo(path).Length > options.MaxFileBytes) { Skip("file too large (over 1 MB)"); continue; }
+
+                    var content = File.ReadAllText(path);
+                    if (string.IsNullOrWhiteSpace(content)) { Skip("empty"); continue; }
+                    if (content.Contains('\0')) { Skip("binary content"); continue; }
+
+                    known.Add(path);
+                    added.Add(new ContextDocItem { Title = Path.GetFileName(path), Content = content, Source = path });
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Skip("unreadable");
+                }
+            }
+
+            CommitAttached(added, added.Count == 1 ? $"Attached {added[0].Name}" : $"Attached {added.Count} files", skipped, hitLimit: false);
+        }
+
+        private void AttachFolder(string folder)
+        {
             FolderScanResult result;
             try
             {
-                result = Knovara.Common.FolderScanner.Scan(dialog.FolderName);
+                result = FolderScanner.Scan(folder);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Could not read folder '{dialog.FolderName}': {ex.Message}", "Folder Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ShowAttachStatus($"Could not read folder '{folder}': {ex.Message}", warning: true);
                 return;
             }
 
-            var already = _contextDocuments.Select(d => d.Source).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var added = 0;
+            var known = _contextDocuments.Select(d => d.Source).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var skipped = result.Skipped.ToDictionary(s => s.Key, s => s.Value);
+            var added = new List<ContextDocItem>();
             foreach (var file in result.Files)
             {
-                if (already.Contains(file.FullPath)) continue;
-                _contextDocuments.Add(new ContextDocItem { Title = file.RelativePath, Content = file.Content, Source = file.FullPath });
-                added++;
+                if (!known.Add(file.FullPath))
+                {
+                    skipped["already attached"] = skipped.GetValueOrDefault("already attached") + 1;
+                    continue;
+                }
+                added.Add(new ContextDocItem { Title = file.RelativePath, Content = file.Content, Source = file.FullPath });
             }
+
+            var name = Path.GetFileName(folder.TrimEnd('\\', '/'));
+            CommitAttached(added, $"Attached {added.Count} file(s) from '{name}'", skipped, result.HitLimit);
+        }
+
+        private void CommitAttached(List<ContextDocItem> added, string headline, Dictionary<string, int> skipped, bool hitLimit)
+        {
+            foreach (var item in added) _contextDocuments.Add(item);
             UpdateContextSummary();
 
-            var message = $"Attached {added} file(s) from '{Path.GetFileName(dialog.FolderName.TrimEnd('\\', '/'))}'.";
-            if (result.Files.Count - added > 0) message += $"\n{result.Files.Count - added} already attached were left as they were.";
-            if (result.Skipped.Count > 0)
+            var message = added.Count == 0 ? "Nothing new was attached" : headline;
+            if (skipped.Count > 0)
             {
-                message += "\n\nSkipped:\n" + string.Join("\n", result.Skipped.Select(s => $"  {s.Value} - {s.Key}"));
+                message += " - skipped: " + string.Join(", ", skipped.Select(s => $"{s.Value} {s.Key}"));
             }
-            MessageBox.Show(message, "Folder Attached", MessageBoxButton.OK,
-                result.HitLimit ? MessageBoxImage.Warning : MessageBoxImage.Information);
+            message += ".";
+
+            ShowAttachStatus(message, warning: hitLimit || added.Count == 0,
+                undo: added.Count == 0 ? null : () =>
+                {
+                    foreach (var item in added) _contextDocuments.Remove(item);
+                    UpdateContextSummary();
+                    ShowAttachStatus($"Removed the {added.Count} document(s) just attached.");
+                });
         }
+
+        private void ShowAttachStatus(string message, bool warning = false, Action? undo = null)
+        {
+            _undoAction = undo;
+            AttachStatusText.Text = message;
+            AttachStatusText.Foreground = warning ? System.Windows.Media.Brushes.SaddleBrown : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x14, 0x53, 0x2D));
+            AttachStatusBorder.Background = warning ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFE, 0xF3, 0xC7)) : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDC, 0xFC, 0xE7));
+            AttachStatusBorder.BorderBrush = warning ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFC, 0xD3, 0x4D)) : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x86, 0xEF, 0xAC));
+            UndoButton.Visibility = undo is null ? Visibility.Collapsed : Visibility.Visible;
+            AttachStatusBorder.Visibility = Visibility.Visible;
+        }
+
+        private void OnUndoClicked(object sender, RoutedEventArgs e)
+        {
+            var undo = _undoAction;
+            _undoAction = null;
+            undo?.Invoke();
+        }
+
+        private void OnDismissStatusClicked(object sender, RoutedEventArgs e)
+        {
+            _undoAction = null;
+            AttachStatusBorder.Visibility = Visibility.Collapsed;
+        }
+
+        #region Drag & drop of files and folders onto the context panel
+
+        private static bool HasFiles(DragEventArgs e) => e.Data.GetDataPresent(DataFormats.FileDrop);
+
+        private void OnContextDragOver(object sender, DragEventArgs e)
+        {
+            e.Effects = HasFiles(e) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+            if (HasFiles(e))
+            {
+                ContextPanel.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x25, 0x63, 0xEB));
+                ContextPanel.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE0, 0xEA, 0xFF));
+            }
+        }
+
+        private void OnContextDragLeave(object sender, DragEventArgs e) => ResetDropHighlight();
+
+        private void ResetDropHighlight()
+        {
+            ContextPanel.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCB, 0xD5, 0xE1));
+            ContextPanel.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF1, 0xF5, 0xF9));
+        }
+
+        private void OnContextDrop(object sender, DragEventArgs e)
+        {
+            ResetDropHighlight();
+            e.Handled = true;
+            if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped) return;
+
+            var files = dropped.Where(File.Exists).ToList();
+            var folders = dropped.Where(Directory.Exists).ToList();
+            if (folders.Count == 0) { AttachFiles(files); return; }
+
+            // Folders and loose files can arrive together; scan each folder, then the loose files, and
+            // report once so the status line is not overwritten between them.
+            var before = _contextDocuments.Count;
+            foreach (var folder in folders) AttachFolder(folder);
+            if (files.Count > 0) AttachFiles(files);
+            if (folders.Count + (files.Count > 0 ? 1 : 0) > 1)
+            {
+                ShowAttachStatus($"Dropped items added {_contextDocuments.Count - before} document(s).");
+            }
+        }
+
+        #endregion
 
         private void OnAddCustomDocClicked(object sender, RoutedEventArgs e)
         {
@@ -175,11 +286,7 @@ namespace Knovara.Desktop
 
             if (string.IsNullOrEmpty(content))
             {
-                MessageBox.Show(
-                    "Type the note's text in the content box next to this button.\n\n"
-                    + "To attach a file instead, use \"Attach File(s)\" above — that attaches it straight away "
-                    + "and does not fill these boxes.",
-                    "Content Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ShowAttachStatus("Type the note's text first. To attach files, use Attach Files / Attach Folder or drag them here.", warning: true);
                 return;
             }
 
@@ -207,19 +314,32 @@ namespace Knovara.Desktop
                 var item = _contextDocuments.FirstOrDefault(d => d.Id == id);
                 if (item != null)
                 {
+                    var index = _contextDocuments.IndexOf(item);
                     _contextDocuments.Remove(item);
                     UpdateContextSummary();
+                    ShowAttachStatus($"Removed {item.Name}.", undo: () =>
+                    {
+                        _contextDocuments.Insert(Math.Min(index, _contextDocuments.Count), item);
+                        UpdateContextSummary();
+                        ShowAttachStatus($"Restored {item.Name}.");
+                    });
                 }
             }
         }
 
         private void OnClearContextDocsClicked(object sender, RoutedEventArgs e)
         {
-            if (_contextDocuments.Count > 0)
+            if (_contextDocuments.Count == 0) return;
+
+            var removed = _contextDocuments.ToList();
+            _contextDocuments.Clear();
+            UpdateContextSummary();
+            ShowAttachStatus($"Cleared {removed.Count} document(s).", undo: () =>
             {
-                _contextDocuments.Clear();
+                foreach (var item in removed) _contextDocuments.Add(item);
                 UpdateContextSummary();
-            }
+                ShowAttachStatus($"Restored {removed.Count} document(s).");
+            });
         }
 
         private void OnPinIngestedToContextClicked(object sender, RoutedEventArgs e)
@@ -346,12 +466,39 @@ namespace Knovara.Desktop
 
         #endregion // Document Management
 
+        private void OnBudgetChanged(object sender, TextChangedEventArgs e)
+        {
+            if (IsLoaded) UpdateContextSummary();
+        }
+
         private void UpdateContextSummary()
         {
+            var count = _contextDocuments.Count;
             var totalTokens = _contextDocuments.Sum(d => d.EstimatedTokens);
-            ContextSummaryText.Text = $" {_contextDocuments.Count} document(s) attached (~{totalTokens} tokens)";
-            AskButton.Content = _contextDocuments.Count > 0
-                ? $"Ask Knovara ({_contextDocuments.Count} Doc{( _contextDocuments.Count > 1 ? "s" : "" )} in Context)"
+            ContextEmptyHint.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ClearAllButton.IsEnabled = count > 0;
+
+            if (count == 0)
+            {
+                ContextSummaryText.Text = "No documents attached";
+                ContextSummaryText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x64, 0x74, 0x8B));
+            }
+            else
+            {
+                var text = $"{count} document{(count == 1 ? "" : "s")} · ~{totalTokens:N0} tokens (estimated)";
+                var over = int.TryParse(AskBudgetBox.Text, out var budget) && budget > 0 && totalTokens > budget;
+                if (over)
+                {
+                    text += $" · more than the {budget:N0}-token budget, so only the passages most relevant to your question will be used";
+                }
+                ContextSummaryText.Text = text;
+                ContextSummaryText.Foreground = over
+                    ? System.Windows.Media.Brushes.SaddleBrown
+                    : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x64, 0x74, 0x8B));
+            }
+
+            AskButton.Content = count > 0
+                ? $"Ask Knovara ({count} Doc{(count > 1 ? "s" : "")} in Context)"
                 : "Ask Knovara (Corpus Search)";
         }
 
