@@ -21,5 +21,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Knovara.Api\Knovara.Api.csproj" />
+    <ProjectReference Include="..\Knovara.Mcp\Knovara.Mcp.csproj" />
   </ItemGroup>
 </Project>

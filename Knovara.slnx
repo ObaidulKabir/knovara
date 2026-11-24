@@ -13,6 +13,7 @@
     <Project Path="src/Knovara.Indexing/Knovara.Indexing.csproj" />
     <Project Path="src/Knovara.Ingestion/Knovara.Ingestion.csproj" />
     <Project Path="src/Knovara.KnowledgeRepresentation/Knovara.KnowledgeRepresentation.csproj" />
+    <Project Path="src/Knovara.Mcp/Knovara.Mcp.csproj" />
     <Project Path="src/Knovara.Models/Knovara.Models.csproj" />
     <Project Path="src/Knovara.Retrieval/Knovara.Retrieval.csproj" />
   </Folder>

@@ -24,6 +24,7 @@ built yet.
 src/
   Knovara.Api                      API gateway (ASP.NET Core Web API)
   Knovara.Cli                      Thin CLI over the API (no project reference to the server)
+  Knovara.Mcp                      MCP server (stdio) exposing the API as tools to Claude and other MCP clients
   Knovara.Core                     Shared domain models + service contracts
   Knovara.Ingestion                RabbitMQ ingestion queue
   Knovara.KnowledgeRepresentation  Hierarchy validation + Postgres Resource & Knowledge Store (D1)
@@ -230,6 +231,57 @@ or set `$KNOVARA_TENANT`) work on every command. Run `dotnet run --project src/K
 for the full list. One known gap, found while building this: `GET /api/resources/{id}` doesn't
 expose a failed resource's error message yet, even though it's recorded in Postgres (`last_error`)
 — `status`/`watch` say so rather than hiding it.
+
+## MCP server
+
+`Knovara.Mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server (stdio, built on the
+official open-source C# SDK), so Claude Code, Claude Desktop and any other MCP client can ground answers
+in a tenant's knowledge base. Like the CLI it has no project reference to the server: it calls the public
+HTTP API.
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `knovara_ask` | Source-cited passages for a question, packed to a token budget | read-only |
+| `knovara_search` | One retrieval mode (`Adaptive`, `Lexical`, `Semantic`, `Hybrid`, `HybridRerank`) with raw ranked passages | read-only |
+| `knovara_list_documents` | Every document for the tenant with its status | read-only |
+| `knovara_get_document_status` | Status of one document | read-only |
+| `knovara_ingest` | Queue a URL / worker-volume path for ingestion (async; poll the status tool) | writes |
+| `knovara_delete_document` | Permanently delete a document and its derived data | **destructive** |
+
+Configuration is by environment variable:
+
+| Variable | |
+|---|---|
+| `KNOVARA_TENANT_ID` | **Required.** The one tenant this server can touch. |
+| `KNOVARA_API_URL` | Default `http://127.0.0.1:5299`. |
+| `KNOVARA_JWT` | Bearer token, when the API runs with `Authentication:Enabled`. |
+
+The tenant is deliberately server configuration and not a tool argument, so a model (or text injected into a
+document it read) cannot switch to another tenant's data. The server exits with an error if it is not set.
+
+Build once, then register it with your client (use the absolute path to the built exe):
+
+```powershell
+dotnet build src/Knovara.Mcp
+claude mcp add knovara --env KNOVARA_TENANT_ID=acme -- "C:\path\to\src\Knovara.Mcp\bin\Debug\net10.0\knovara-mcp.exe"
+```
+
+or in a client's JSON config (`.mcp.json`, Claude Desktop's `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "knovara": {
+      "command": "C:\\path\\to\\src\\Knovara.Mcp\\bin\\Debug\\net10.0\\knovara-mcp.exe",
+      "env": { "KNOVARA_TENANT_ID": "acme", "KNOVARA_API_URL": "http://127.0.0.1:5299" }
+    }
+  }
+}
+```
+
+The API must be running (see "Run locally"). `knovara_ingest` has the same limit as the desktop app: the
+worker reads URLs or files in its source volume, not paths on the client machine. Over stdio the server only
+speaks to the local client that launched it; it opens no network port.
 
 ## Run locally
 
