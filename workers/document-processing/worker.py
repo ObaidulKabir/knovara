@@ -5,8 +5,9 @@ Consumes ingestion jobs from RabbitMQ. For each job it:
   2. hashes it and asks the API whether that version is new (an unchanged
      source stops here, before any parsing),
   3. converts it with Docling (PDF, DOCX, PPTX, HTML, Markdown),
-  4. turns Docling's document into a hierarchy: document -> sections -> passages,
-     splitting oversized passages on sentence (or table-row) boundaries,
+  4. turns Docling's document into a hierarchy: document -> sections -> passages, one passage
+     per structural unit (paragraph, list, table, code), joining units too small to be found on
+     their own and splitting oversized ones on sentence (or table-row) boundaries,
   5. posts the hierarchy back to the API, or reports the failure.
 
 See system_architecture.md "Format-Aware Processing" and README.md.
@@ -35,6 +36,7 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import DocItemLabel, PictureItem, SectionHeaderItem, TableItem, TitleItem
+from tokenizers import Tokenizer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("document-processing-worker")
@@ -44,7 +46,11 @@ API_BASE_URL = os.environ.get("ICE_API_BASE_URL", "http://localhost:5000")
 QUEUE_NAME = os.environ.get("INGESTION_QUEUE", "ingestion.requests")
 SOURCE_ROOT = Path(os.environ.get("SOURCE_ROOT", "/sources"))
 MAX_SOURCE_BYTES = int(os.environ.get("MAX_SOURCE_BYTES", str(50 * 1024 * 1024)))
-MAX_CHUNK_CHARS = int(os.environ.get("MAX_CHUNK_CHARS", "3000"))
+# Passage size is counted in the embedding model's own tokens. The embedder and the reranker both
+# read at most 512 tokens, and the reranker shares that with the question, so the cap stays below it.
+CHUNK_TOKENIZER = os.environ.get("CHUNK_TOKENIZER", "/opt/tokenizer/tokenizer.json")
+MAX_CHUNK_TOKENS = int(os.environ.get("MAX_CHUNK_TOKENS", "384"))
+MIN_CHUNK_TOKENS = int(os.environ.get("MIN_CHUNK_TOKENS", "64"))
 ALLOW_PRIVATE_URLS = os.environ.get("ALLOW_PRIVATE_URLS", "false").lower() == "true"
 DO_OCR = os.environ.get("DOCLING_DO_OCR", "false").lower() == "true"
 ARTIFACTS_PATH = os.environ.get("DOCLING_ARTIFACTS_PATH")
@@ -54,7 +60,7 @@ MAX_TITLE_CHARS = 1000
 
 # Part of every version hash: the stored hierarchy depends on the extraction logic as well as the
 # source bytes, so bumping this re-processes every source once on its next ingest.
-EXTRACTOR_VERSION = "docling-hierarchy-2"
+EXTRACTOR_VERSION = "docling-hierarchy-3"
 NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+\S")
 
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".html", ".htm", ".md", ".markdown"}
@@ -76,6 +82,8 @@ LEVEL_BY_LABEL = {
     DocItemLabel.CAPTION: "caption",
     DocItemLabel.FOOTNOTE: "footnote",
 }
+# Objects that stay one passage each instead of being joined with neighbouring text.
+STANDALONE_LEVELS = {"table", "figure", "code"}
 
 
 class SourceError(Exception):
@@ -99,6 +107,16 @@ class FetchedSource:
     data: bytes
     suffix: str
     name: str
+
+
+@dataclass(frozen=True)
+class Unit:
+    """One structural piece of a section's text, before small neighbours are joined."""
+    level: str
+    text: str
+    metadata: dict
+    tokens: int
+    list_ref: str | None
 
 
 # --------------------------------------------------------------------------- fetching
@@ -228,6 +246,14 @@ def to_nodes(document, source_name: str) -> list[dict]:
     def parent() -> str:
         return sections[-1][1] if sections else root
 
+    pending: list[Unit] = []  # the current section's text units, joined when the section ends
+
+    def flush() -> None:
+        for group in merge_units(pending):
+            level, content, metadata = combine(group)
+            add(parent(), level, heading_path(), content, metadata)
+        pending.clear()
+
     for item, _depth in document.iterate_items():
         label = getattr(item, "label", None)
         if label in SKIPPED_LABELS or getattr(item, "self_ref", None) in caption_refs:
@@ -253,6 +279,7 @@ def to_nodes(document, source_name: str) -> list[dict]:
                 nodes[0]["title"] = text[:MAX_TITLE_CHARS]
                 titled = True
                 continue
+            flush()
             heading_level = levels.get(item.self_ref, item.level or 1)
             while sections and sections[-1][0] >= heading_level:
                 sections.pop()
@@ -274,14 +301,60 @@ def to_nodes(document, source_name: str) -> list[dict]:
             continue
         content_seen = True
 
-        chunks = pieces(content, MAX_CHUNK_CHARS)
+        chunks = pieces(content, MAX_CHUNK_TOKENS)
+        standalone = level in STANDALONE_LEVELS
+        if standalone:
+            flush()
+        list_ref = item.parent.cref if level == "list_item" and getattr(item, "parent", None) else None
         for index, chunk in enumerate(chunks, start=1):
             chunk_metadata = dict(metadata)
             if len(chunks) > 1:
                 chunk_metadata["chunk"] = f"{index}/{len(chunks)}"
-            add(parent(), level, heading_path(), chunk, chunk_metadata)
+            if standalone:
+                add(parent(), level, heading_path(), chunk, chunk_metadata)
+            else:
+                pending.append(Unit(level, chunk, chunk_metadata, count_tokens(chunk), list_ref))
 
+    flush()
     return nodes
+
+
+def merge_units(units: list[Unit]) -> list[list[Unit]]:
+    """Groups a section's consecutive units: small ones join neighbours, a list stays together, none exceeds the cap."""
+    groups: list[list[Unit]] = []
+    for unit in units:
+        if groups and joinable(groups[-1], unit):
+            groups[-1].append(unit)
+        else:
+            groups.append([unit])
+    return groups
+
+
+def joinable(group: list[Unit], unit: Unit) -> bool:
+    size = sum(member.tokens for member in group)
+    if size + unit.tokens > MAX_CHUNK_TOKENS:
+        return False
+    same_list = unit.list_ref is not None and unit.list_ref == group[-1].list_ref
+    # A unit under the minimum (an author line, a one-line paragraph) carries too little meaning to
+    # be found on its own; two units that are each big enough stay separate passages.
+    return same_list or size < MIN_CHUNK_TOKENS or unit.tokens < MIN_CHUNK_TOKENS
+
+
+def combine(group: list[Unit]) -> tuple[str, str, dict]:
+    if len(group) == 1:
+        return group[0].level, group[0].text, group[0].metadata
+    levels = {member.level for member in group}
+    level = "list" if levels == {"list_item"} else next(iter(levels)) if len(levels) == 1 else "text"
+    metadata = {
+        "label": ",".join(dict.fromkeys(member.metadata["label"] for member in group)),
+        "merged": str(len(group)),
+    }
+    pages = [member.metadata["page"] for member in group if "page" in member.metadata]
+    if pages:
+        metadata["page"] = pages[0]
+        if pages[-1] != pages[0]:
+            metadata["pageEnd"] = pages[-1]
+    return level, "\n".join(member.text for member in group), metadata
 
 
 def heading_levels(document) -> tuple[dict[str, int], bool]:
@@ -306,42 +379,64 @@ def heading_levels(document) -> tuple[dict[str, int], bool]:
     return levels, True
 
 
-def split_text(text: str, limit: int) -> list[str]:
-    """Splits on sentence boundaries; a single sentence longer than the limit is cut at the limit."""
-    if len(text) <= limit:
-        return [text]
-    chunks, current = [], ""
-    for sentence in re.split(r"(?<=[.!?])\s+", text):
-        while len(sentence) > limit:
+@functools.cache
+def tokenizer() -> Tokenizer:
+    loaded = Tokenizer.from_file(CHUNK_TOKENIZER)
+    loaded.no_truncation()  # the saved tokenizer truncates at 512, which would hide oversized passages
+    loaded.no_padding()
+    return loaded
+
+
+def count_tokens(text: str) -> int:
+    return len(tokenizer().encode(text, add_special_tokens=False).ids)
+
+
+def pack(parts: list[str], separator: str, limit: int, split_part) -> list[str]:
+    """Joins consecutive parts up to the token limit; a part over the limit on its own goes to split_part."""
+    chunks, current, size = [], [], 0
+    for part in parts:
+        tokens = count_tokens(part)
+        if tokens > limit:
             if current:
-                chunks.append(current)
-                current = ""
-            chunks.append(sentence[:limit])
-            sentence = sentence[limit:]
-        if current and len(current) + 1 + len(sentence) > limit:
-            chunks.append(current)
-            current = sentence
-        else:
-            current = f"{current} {sentence}".strip()
+                chunks.append(separator.join(current))
+                current, size = [], 0
+            chunks.extend(split_part(part))
+            continue
+        if current and size + tokens > limit:
+            chunks.append(separator.join(current))
+            current, size = [], 0
+        current.append(part)
+        size += tokens
     if current:
-        chunks.append(current)
+        chunks.append(separator.join(current))
     return chunks
+
+
+def split_text(text: str, limit: int) -> list[str]:
+    """Splits on sentence boundaries, then between words; a single over-long word is cut."""
+    if count_tokens(text) <= limit:
+        return [text]
+
+    def cut(word: str) -> list[str]:
+        return [word[i:i + limit] for i in range(0, len(word), limit)]  # a token is at least one character
+
+    def split_sentence(sentence: str) -> list[str]:
+        return pack(sentence.split(), " ", limit, cut)
+
+    return pack(re.split(r"(?<=[.!?])\s+", text), " ", limit, split_sentence)
 
 
 def split_table(markdown: str, limit: int) -> list[str]:
     """Splits a Markdown table between rows, repeating the header row and separator in every piece."""
-    if len(markdown) <= limit:
+    if count_tokens(markdown) <= limit:
         return [markdown]
     lines = markdown.splitlines()
-    header, rows = lines[:2], lines[2:]
-    chunks, current = [], list(header)
-    for row in rows:
-        if len(current) > len(header) and len("\n".join(current + [row])) > limit:
-            chunks.append("\n".join(current))
-            current = list(header)
-        current.append(row)
-    chunks.append("\n".join(current))
-    return [chunk if len(chunk) <= limit else chunk[:limit] for chunk in chunks]
+    header = "\n".join(lines[:2])
+    budget = limit - count_tokens(header)
+    if budget < limit // 2:  # a header this wide would leave too little room for rows
+        return split_text(markdown, limit)
+    pieces = pack(lines[2:], "\n", budget, lambda row: split_text(row, budget))
+    return [f"{header}\n{piece}" for piece in pieces]
 
 
 # --------------------------------------------------------------------------- API

@@ -15,6 +15,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
 RUN docling-tools models download --output-dir "$DOCLING_ARTIFACTS_PATH"
 
+# Passage sizes are counted in the embedding model's tokens; keep this in step with the model service's EMBEDDING_MODEL.
+ARG CHUNK_TOKENIZER_MODEL=BAAI/bge-small-en-v1.5
+ENV CHUNK_TOKENIZER=/opt/tokenizer/tokenizer.json
+RUN mkdir -p /opt/tokenizer \
+    && python -c "import sys; from tokenizers import Tokenizer; Tokenizer.from_pretrained(sys.argv[1]).save(sys.argv[2])" \
+       "$CHUNK_TOKENIZER_MODEL" "$CHUNK_TOKENIZER"
+
 RUN useradd --create-home --uid 10001 worker
 USER worker
 

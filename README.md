@@ -66,14 +66,19 @@ What the hierarchy looks like:
 - Each passage's title is its heading path (`Document > Section > Subsection`), and it is indexed
   with the passage, so a search for a section's topic finds its passages.
 - Table and figure captions are kept inside their table or figure, not repeated as separate passages.
-- Passages longer than `MAX_CHUNK_CHARS` (default 3000) are split on sentence boundaries;
-  tables are split between rows with the header row repeated in every piece.
+- Each structural unit (paragraph, list, table, figure, code block) becomes a passage. Sizes are
+  counted in the embedding model's tokens, because the embedder and reranker only read 512.
+- Units under `MIN_CHUNK_TOKENS` (default 64), such as an author line or a one-line paragraph,
+  are joined with their neighbours in the same section, and the items of one list stay together.
+  Joining never crosses a heading, and tables, figures and code blocks are never joined.
+- Passages over `MAX_CHUNK_TOKENS` (default 384) are split on sentence boundaries; tables are
+  split between rows with the header row repeated in every piece.
 
 Search matches **any** of the question's terms (not all of them) and ranks passages by how many
 terms they match and how close together. Ordinary questions ("how long are payment logs kept")
 need this; exact-phrase and semantic matching arrive in Phase 2.
 
-Worker settings (environment variables): `MAX_CHUNK_CHARS`, `MAX_SOURCE_BYTES` (50 MB),
+Worker settings (environment variables): `MIN_CHUNK_TOKENS`, `MAX_CHUNK_TOKENS`, `MAX_SOURCE_BYTES` (50 MB),
 `DOCLING_DO_OCR` (`false`; turn on for scanned PDFs, at a large cost in time), `ALLOW_PRIVATE_URLS`.
 
 PDFs are the slow case: the 9-page Docling technical report took 2–5 minutes on this machine's
