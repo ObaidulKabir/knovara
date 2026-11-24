@@ -4,13 +4,19 @@ Application for the Intelligent Context Engine described in
 [business_architecture.md](business_architecture.md), [system_architecture.md](system_architecture.md),
 and [system_specifications.md](system_specifications.md).
 
-**Phase 1 (intelligent document ingestion) is implemented:** PDF, DOCX, PPTX, HTML and
-Markdown sources are fetched and hashed by a Docling worker, converted into a hierarchy
-(document → sections → passages, with oversized passages split on sentence or table-row
-boundaries), and stored in Postgres. An unchanged source stops at the version check, before
-any parsing. Stored passages are searchable with Postgres full-text search, and `/ask`
-verifies every piece of evidence against the current stored passage. Context memory and
-evaluation are still in-memory; semantic search, summaries and reranking arrive in Phase 2.
+**Phases 1 and 2 are implemented.**
+
+- **Phase 1, intelligent document ingestion:** PDF, DOCX, PPTX, HTML and Markdown sources are
+  fetched and hashed by a Docling worker, converted into a hierarchy (document → sections →
+  passages, one passage per structural unit) and stored in Postgres. An unchanged source stops
+  at the version check, before any parsing.
+- **Phase 2, hybrid retrieval:** passages are embedded by a self-hosted model service (open
+  models on CPU, no paid APIs) and searched with Postgres full-text search, pgvector, or both,
+  with a cross-encoder reranker on top. `/ask` verifies every piece of evidence against the
+  current stored passage.
+
+Context memory and evaluation are still in-memory, and section and document summaries are not
+built yet.
 
 ## Layout
 
@@ -20,15 +26,20 @@ src/
   ICE.Core                     Shared domain models + service contracts
   ICE.Ingestion                RabbitMQ ingestion queue
   ICE.KnowledgeRepresentation  Hierarchy validation + Postgres Resource & Knowledge Store (D1)
-  ICE.Indexing                 Postgres full-text search over stored passages
-  ICE.Retrieval                Intelligent Retrieval Service
+  ICE.Indexing                 Postgres full-text and pgvector search over stored passages
+  ICE.Retrieval                Intelligent Retrieval Service (lexical, semantic, hybrid, rerank)
+  ICE.Models                   Client for the model service (embeddings, reranking)
   ICE.ContextOptimization      Context Optimization Service
   ICE.ContextMemory            Context Memory Service (in-memory until Phase 3)
   ICE.Evaluation               Evaluation & Observability Service (in-memory)
 workers/
   document-processing          Python/Docling extraction worker (RabbitMQ consumer)
+services/
+  model-service                Self-hosted embeddings and reranking (FastAPI + fastembed, CPU)
+eval/
+  run_benchmark.py             Retrieval benchmark over questions.json; reports in eval/results/
 infra/
-  docker-compose.yml           Postgres+pgvector, Redis, RabbitMQ, API, worker
+  docker-compose.yml           Postgres+pgvector, Redis, RabbitMQ, model service, API, worker
   postgres/                    Schema (init.sql), baked into the Postgres image
 sources/
   samples/                     Sample documents for trying ingestion
@@ -74,15 +85,60 @@ What the hierarchy looks like:
 - Passages over `MAX_CHUNK_TOKENS` (default 384) are split on sentence boundaries; tables are
   split between rows with the header row repeated in every piece.
 
-Search matches **any** of the question's terms (not all of them) and ranks passages by how many
-terms they match and how close together. Ordinary questions ("how long are payment logs kept")
-need this; exact-phrase and semantic matching arrive in Phase 2.
-
 Worker settings (environment variables): `MIN_CHUNK_TOKENS`, `MAX_CHUNK_TOKENS`, `MAX_SOURCE_BYTES` (50 MB),
 `DOCLING_DO_OCR` (`false`; turn on for scanned PDFs, at a large cost in time), `ALLOW_PRIVATE_URLS`.
 
 PDFs are the slow case: the 9-page Docling technical report took 2–5 minutes on this machine's
 CPU, while Markdown, HTML and DOCX take well under a second.
+
+## How retrieval works
+
+When the API stores a version's passages, it has the model service embed each one as its heading
+path plus its text, and keeps the vector in `knowledge_nodes.embedding` along with the model's
+name. A resource whose stored embeddings come from a different model counts as changed on its
+next ingest, so switching models re-embeds it.
+
+There are four retrieval modes. `/ask` uses `HybridRerank`; `POST /api/retrieval/search` runs
+any one of them so they can be compared.
+
+| Mode | What it does |
+|---|---|
+| `Lexical` | Postgres full-text search. Matches **any** of the question's terms and ranks passages by how many match and how close together. |
+| `Semantic` | Embedding similarity through pgvector (HNSW, cosine distance), filtered by tenant and embedding model. |
+| `Hybrid` | The top 30 lexical and top 30 semantic results merged with Reciprocal Rank Fusion. |
+| `HybridRerank` | The merged candidates (typically 30–40) reordered by a cross-encoder, which reads question and passage together. |
+
+On the sample corpus, `Semantic` and `HybridRerank` both put a correct passage in the top 3 for
+90% of the benchmark questions, against 68% for `Lexical`, which mostly misses questions worded
+differently from the document. `Semantic` answers in about 30 ms; `HybridRerank` takes about
+2.5 s on CPU for a slightly better first result. See [eval/results](eval/results) and
+system_architecture.md "Retrieval Strategy by Data Size" for how this should change as data grows.
+
+### Model service
+
+`services/model-service` runs `BAAI/bge-small-en-v1.5` (384-dimensional embeddings) and
+`Xenova/ms-marco-MiniLM-L-6-v2` (reranker) through ONNX Runtime on CPU. Both models are baked
+into its image. Changing the embedding model means rebuilding the image, matching the
+`vector(384)` column in `init.sql` and the worker's `CHUNK_TOKENIZER_MODEL` build argument, and
+re-ingesting.
+
+Settings: `MODEL_THREADS` (2 in docker-compose) and `INFERENCE_BATCH_SIZE` (8). Inference runs in
+small length-sorted batches because one large batch of long passages exhausted the container's
+memory; a full benchmark run now peaks around 600 MB of its `MODEL_SERVICE_MEM_LIMIT` (2200m).
+
+### Benchmark
+
+```powershell
+python eval/run_benchmark.py
+```
+
+It asks the 40 questions in `eval/questions.json` in every mode, against the API on
+`127.0.0.1:5299` for tenant `acme`, and writes a Markdown and JSON report to `eval/results/`:
+Recall@1/3/5/10, MRR, Recall@3 for questions that use the document's wording and for paraphrased
+ones, the size of the top 3 passages, and p50/p95 latency. A passage counts as correct if it
+contains one of the question's expected fragments. The questions cover the three files in
+`sources/samples` and the Docling technical report (https://arxiv.org/pdf/2408.09869), all
+ingested for tenant `acme`.
 
 ## Endpoints
 
@@ -91,23 +147,25 @@ Every request carries an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads
 - `POST /api/resources/ingest` — `{ "uri": "samples/payment-service-guide.md", "type": "Document" }`. `type` is `Document` or `Website`; `Code` returns 400 until Phase 4.
 - `GET /api/resources/{resourceId}` — the resource, with its current version and status.
 - `POST /api/resources/{resourceId}/version`, `/nodes`, `/failure` — called by the worker.
-- `POST /api/retrieval/ask` — `{ "sessionId": "s1", "question": "maximum retry interval" }`. Evidence cache → on a miss, full-text search → each passage re-read from Postgres and dropped if its source has changed → context optimization. Returns a `ContextPackage`.
+- `POST /api/retrieval/ask` — `{ "sessionId": "s1", "question": "maximum retry interval" }`. Evidence cache → on a miss, `HybridRerank` retrieval → each passage re-read from Postgres and dropped if its source has changed → context optimization. Returns a `ContextPackage`.
+- `POST /api/retrieval/search` — `{ "question": "maximum retry interval", "mode": "Semantic", "topK": 10 }`. Runs one retrieval mode with no cache and no context optimization, for the benchmark. `mode` is `Lexical`, `Semantic`, `Hybrid` or `HybridRerank` (default); `topK` defaults to 5.
 - `GET/PUT /api/memory/sessions/{sessionId}` — session knowledge memory.
 - `GET /api/evaluation/recent` — recent per-task metrics, including whether the evidence cache was hit.
 
 ## Run locally
 
-Start Postgres and RabbitMQ, then run the API on the host:
+Start Postgres, RabbitMQ and the model service, then run the API on the host:
 
 ```powershell
-docker compose -f infra/docker-compose.yml up -d --build postgres rabbitmq
+docker compose -f infra/docker-compose.yml up -d --build postgres rabbitmq model-service
 ```
 
 ```powershell
 dotnet run --project src/ICE.Api --urls http://0.0.0.0:5299
 ```
 
-`appsettings.Development.json` points the API at Postgres on port 5442 and RabbitMQ on 5672.
+`appsettings.Development.json` points the API at Postgres on port 5442, RabbitMQ on 5672 and the
+model service on 8090.
 Then start the worker, pointed at the API on the host:
 
 ```powershell
@@ -136,7 +194,12 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env up --build
 ```
 
 The API is then on http://localhost:5000. Host ports are set by `POSTGRES_HOST_PORT` (5442),
-`RABBITMQ_HOST_PORT` (5672), `REDIS_HOST_PORT` (6379) and `API_HOST_PORT` (5000).
+`RABBITMQ_HOST_PORT` (5672), `REDIS_HOST_PORT` (6379), `MODEL_SERVICE_HOST_PORT` (8090) and
+`API_HOST_PORT` (5000).
+
+Memory: the model service and worker are capped by `MODEL_SERVICE_MEM_LIMIT` (2200m) and
+`WORKER_MEM_LIMIT` (1800m) and restart if they exceed it. Give Docker at least 4 GB; with the
+2 GB default, converting the sample PDF ran out of memory.
 
 ### Schema changes
 
@@ -150,7 +213,7 @@ docker compose -f infra/docker-compose.yml down -v; docker compose -f infra/dock
 ## Next steps
 
 0. **Authentication.** The tenant currently comes from a header the caller sets, which is only safe behind a trusted gateway. The worker-facing endpoints (`version`, `nodes`, `failure`) should also require a worker credential. Add authentication middleware that derives the tenant from the verified credential and sets it where controllers read `TenantHeader`.
-1. **Phase 2 — hybrid retrieval:** embeddings into `knowledge_nodes.embedding` (pgvector), section and document summaries, contextual chunk text, Reciprocal Rank Fusion and reranking in `ICE.Retrieval`.
+1. **Phase 2 remainder:** section and document summaries (with a self-hosted LLM), and tier S1 of system_architecture.md "Retrieval Strategy by Data Size": rerank only the top 20 semantic and top 10 keyword results (about 1 s instead of 2.5 s), rerank only when semantic results look uncertain, a 200+ question benchmark and the distractor scaling test.
 2. **Phase 3 — context memory:** replace `InMemoryContextMemoryService` with Redis, and persist evaluation metrics to the `task_metrics` table.
 3. **Phase 4 — code intelligence:** Tree-sitter parsing for `Code` sources.
 4. Harden the worker's URL fetching against DNS rebinding (resolve once and connect to the checked address).
