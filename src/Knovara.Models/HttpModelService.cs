@@ -20,6 +20,7 @@ public sealed class ModelServiceOptions
 public sealed class HttpModelService(HttpClient http) : IModelService
 {
     private const int PassageBatchSize = 64;
+    private const int RerankBatchSize = 128;
 
     private ModelInfo? _info;
 
@@ -47,10 +48,22 @@ public sealed class HttpModelService(HttpClient http) : IModelService
     public async Task<IReadOnlyList<double>> RerankAsync(string question, IReadOnlyList<string> documents, CancellationToken ct = default)
     {
         if (documents.Count == 0) return [];
-        using var response = await http.PostAsJsonAsync("rerank", new { query = question, documents }, ct);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<RerankResponse>(ct);
-        return result?.Scores ?? throw new InvalidOperationException("The model service returned no rerank scores.");
+
+        // The service rejects more than 256 documents per call; an attached folder easily exceeds that.
+        var scores = new List<double>(documents.Count);
+        foreach (var batch in documents.Chunk(RerankBatchSize))
+        {
+            using var response = await http.PostAsJsonAsync("rerank", new { query = question, documents = batch }, ct);
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<RerankResponse>(ct);
+            var batchScores = result?.Scores ?? throw new InvalidOperationException("The model service returned no rerank scores.");
+            if (batchScores.Length != batch.Length)
+            {
+                throw new InvalidOperationException($"Asked for {batch.Length} rerank scores, got {batchScores.Length}.");
+            }
+            scores.AddRange(batchScores);
+        }
+        return scores;
     }
 
     private async Task<float[][]> EmbedAsync(IReadOnlyList<string> texts, string kind, CancellationToken ct)

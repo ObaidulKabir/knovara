@@ -100,15 +100,19 @@ public sealed partial class RetrievalController : ControllerBase
 
         if (request.Documents is { Count: > 0 })
         {
-            foreach (var doc in request.Documents)
-            {
-                if (string.IsNullOrWhiteSpace(doc.Content)) continue;
+            // Chunked and scored against this question, not pinned whole at a flat score: a large
+            // attachment becomes retrievable passages, so when it cannot all fit the token budget,
+            // the passages actually relevant to the question are the ones that make it in.
+            // All chunks of all documents are scored in one pass (an attached folder is many documents).
+            var chunked = request.Documents
+                .Where(d => !string.IsNullOrWhiteSpace(d.Content))
+                .Select(d => (Doc: d, Chunks: PinnedDocumentChunker.Chunk(d.Content)))
+                .ToList();
+            var allScores = await ScoreChunksAsync(request.Question, chunked.SelectMany(c => c.Chunks).ToList(), ct);
 
-                // Chunked and scored against this question, not pinned whole at a flat score: a large
-                // attachment becomes retrievable passages, so when it cannot all fit the token budget,
-                // the passages actually relevant to the question are the ones that make it in.
-                var chunks = PinnedDocumentChunker.Chunk(doc.Content);
-                var scores = await ScoreChunksAsync(request.Question, chunks, ct);
+            var offset = 0;
+            foreach (var (doc, chunks) in chunked)
+            {
                 var resourceId = doc.Source ?? "direct-context-doc";
                 var baseTitle = string.IsNullOrWhiteSpace(doc.Title) ? "Added Document" : doc.Title;
 
@@ -121,8 +125,9 @@ public sealed partial class RetrievalController : ControllerBase
                         Content: chunks[i],
                         SourceVersion: "current",
                         RetrievedVia: IndexKind.Semantic,
-                        RelevanceScore: PinnedDocumentBaseScore + scores[i]));
+                        RelevanceScore: PinnedDocumentBaseScore + allScores[offset + i]));
                 }
+                offset += chunks.Count;
             }
         }
 

@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
+using Knovara.Common;
 using Microsoft.Win32;
 
 namespace Knovara.Desktop
@@ -60,7 +61,9 @@ namespace Knovara.Desktop
             _http = new HttpClient
             {
                 BaseAddress = new Uri(_baseUrl + "/"),
-                Timeout = TimeSpan.FromSeconds(30)
+                // Ask scores every chunk of every attached document on CPU; an attached folder can take
+                // well over the 30s that was enough for a single file.
+                Timeout = TimeSpan.FromSeconds(180)
             };
             _http.DefaultRequestHeaders.Add("X-Tenant-Id", _tenantId);
             if (!string.IsNullOrWhiteSpace(_jwtToken))
@@ -127,6 +130,42 @@ namespace Knovara.Desktop
                         MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
+        }
+
+        private void OnAttachFolderClicked(object sender, RoutedEventArgs e)
+        {
+            var dialog = new OpenFolderDialog { Title = "Select a Folder to Attach to Context" };
+            if (dialog.ShowDialog() != true) return;
+
+            FolderScanResult result;
+            try
+            {
+                result = Knovara.Common.FolderScanner.Scan(dialog.FolderName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Could not read folder '{dialog.FolderName}': {ex.Message}", "Folder Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var already = _contextDocuments.Select(d => d.Source).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var added = 0;
+            foreach (var file in result.Files)
+            {
+                if (already.Contains(file.FullPath)) continue;
+                _contextDocuments.Add(new ContextDocItem { Title = file.RelativePath, Content = file.Content, Source = file.FullPath });
+                added++;
+            }
+            UpdateContextSummary();
+
+            var message = $"Attached {added} file(s) from '{Path.GetFileName(dialog.FolderName.TrimEnd('\\', '/'))}'.";
+            if (result.Files.Count - added > 0) message += $"\n{result.Files.Count - added} already attached were left as they were.";
+            if (result.Skipped.Count > 0)
+            {
+                message += "\n\nSkipped:\n" + string.Join("\n", result.Skipped.Select(s => $"  {s.Value} - {s.Key}"));
+            }
+            MessageBox.Show(message, "Folder Attached", MessageBoxButton.OK,
+                result.HitLimit ? MessageBoxImage.Warning : MessageBoxImage.Information);
         }
 
         private void OnAddCustomDocClicked(object sender, RoutedEventArgs e)

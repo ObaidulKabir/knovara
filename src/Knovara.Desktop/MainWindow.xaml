@@ -78,6 +78,9 @@
                                     <Button Content="📂 Attach File(s)..." Click="OnBrowseDocumentClicked" Margin="0,0,6,0"
                                             ToolTip="Pick one or more text files; they are attached to the context immediately."
                                             Padding="10,4" Background="#E2E8F0" Foreground="#1E293B" BorderBrush="#CBD5E1" Cursor="Hand"/>
+                                    <Button x:Name="AttachFolderButton" Content="🗂 Attach Folder..." Click="OnAttachFolderClicked" Margin="0,0,6,0"
+                                            ToolTip="Pick a folder; every text file in it and its subfolders (up to 200 files) is attached to the context."
+                                            Padding="10,4" Background="#E2E8F0" Foreground="#1E293B" BorderBrush="#CBD5E1" Cursor="Hand"/>
                                     <Button Content="✕ Clear All" Click="OnClearContextDocsClicked"
                                             Padding="10,4" Background="#FEE2E2" Foreground="#991B1B" BorderBrush="#FECACA" Cursor="Hand"/>
                                 </StackPanel>

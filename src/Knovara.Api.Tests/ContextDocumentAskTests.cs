@@ -211,6 +211,37 @@ namespace Knovara.Api.Tests
         }
 
         [Fact]
+        public async Task Ask_WithManyDocuments_ScoresAllChunksInOneCallAndKeepsScoresWithTheirOwnDocument()
+        {
+            // An attached folder is many documents; scores must land on the right document, and the
+            // model service must be called once, not once per file.
+            var controller = CreateController();
+            var docs = new List<ContextDocument>
+            {
+                new("notes/furniture.md", "Office furniture procurement schedule.", "furniture.md"),
+                new("notes/pilot.md", "The Fairhaven pilot processed 4812 invoices.", "pilot.md"),
+                new("notes/parking.md", "Parking permits renew each January.", "parking.md")
+            };
+
+            var calls = 0;
+            _mockModels.Setup(m => m.RerankAsync("How many invoices?", It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+                       .ReturnsAsync((string _, IReadOnlyList<string> chunks, CancellationToken _) =>
+                       {
+                           calls++;
+                           return chunks.Select(c => c.Contains("invoices") ? 5.0 : -5.0).ToList();
+                       });
+
+            var request = new AskRequest("session-folder", "How many invoices?", TokenBudget: 14, ResourceIds: null, Documents: docs);
+
+            var actionResult = await controller.Ask("test-tenant", request, CancellationToken.None);
+
+            var contextPackage = Assert.IsType<ContextPackage>(Assert.IsType<OkObjectResult>(actionResult.Result).Value);
+            Assert.Equal(1, calls);
+            Assert.Single(contextPackage.Evidence);
+            Assert.Equal("notes/pilot.md", contextPackage.Evidence[0].Title);
+        }
+
+        [Fact]
         public async Task Ask_WhenModelServiceFails_StillReturnsTheAttachedDocument()
         {
             // Arrange
