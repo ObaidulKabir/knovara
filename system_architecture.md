@@ -227,6 +227,53 @@ The tier boundaries above are rules of thumb. A **distractor scaling test** repl
 3. **S2 features** once any tenant passes ~100k passages: coarse retrieval over document/section summaries (requires summaries at ingestion), true BM25, `halfvec`, query cache.
 4. **S3 infrastructure** only when a tenant approaches ~10M passages: dedicated engines, quantization, sharding.
 
+## Application Type & Deployment Model
+
+**Decision: Hybrid, Desktop-First.** Knovara ships as a local-first application with an optional distributed/managed execution path — not a desktop-only tool, and not a SaaS product with a thin local client attached.
+
+### Why not either pure model
+
+| Option | Assessment | Reasoning |
+|---|---|---|
+| **Desktop-only** | Rejected | The measured footprint below exceeds what a naive "install an app" experience can promise. Without lazy model loading, idle-unload and admission control, a corpus large enough to need OCR or a non-trivial index exceeds common consumer hardware, especially alongside the user's OS, browser and IDE. |
+| **SaaS-only** | Rejected | Conflicts with decisions already made: customer-controlled data, no paid third-party model APIs, and an independent local runtime as a mandatory capability. It also makes offline work impossible, which is one of Knovara's differentiators against a conventional RAG-as-a-service product. |
+| **Hybrid, Desktop-First** | Adopted | Local execution is the default — data stays on the user's machine, and it works offline. A tenant whose hardware or backlog exceeds what's local can delegate specific jobs (OCR, bulk embedding) to a remote or managed worker, without surrendering data ownership, because authority (who decides) and orchestration (who executes) stay separate. |
+
+### Measured evidence
+
+The memory cost here is not estimated — it is what this project's own dev stack required:
+
+| Component | Measured footprint |
+|---|---|
+| Model service (embeddings + reranker) | 300 MB cold → climbed to 96% of a 2.2 GB cap during one benchmark run; the underlying growth (ONNX arena allocator) is contained by a memory cap and auto-restart, not fixed |
+| Docling worker (PDF parsing, OCR, table recognition) | Peaked at 1.4–1.8 GB converting a *single* paper; its image is 5.6 GB on disk (PyTorch + Docling's layout and table models baked in) |
+| Full stack (Postgres+pgvector, RabbitMQ, model service, API, worker) | Needed Docker memory raised from a 2 GB default to ~4.78 GB to avoid OOM-killing ingestion of a 4-document toy corpus |
+| OCR, when enabled | "Upwards of 30 seconds per page" on CPU (measured in the Docling technical report itself, ingested as part of this project's own benchmark corpus) |
+
+This is before the user's OS, browser and IDE are running, and it only grows with corpus size (see "Retrieval Strategy by Data Size" above: embeddings alone cost ~15 GB at 10M passages). A typical 8 GB consumer laptop would struggle with this stack as currently composed for development.
+
+### What Desktop-First means in practice
+
+Not a monolith that bundles every always-on service into one process. A thin UI over a local runtime, with the heavy ML work isolated so it can be managed or offloaded rather than left to chance:
+
+1. **Separate "desktop app" from "always-on heavy services."** The current docker-compose stack (Postgres, RabbitMQ, model service, worker, all always running) is a *development* topology, not a shipping one. For desktop distribution: Postgres/pgvector becomes an embedded, single-process option with no Docker dependency for end users; RabbitMQ's distributed durability is unnecessary for one desktop install and is deferred to the distributed/managed tier, replaced locally by an in-process queue.
+2. **Lazy-start and idle-unload the model service and Docling worker.** Don't hold ~1–2 GB of ML models resident when the user isn't actively ingesting or asking a question.
+3. **Admission control before heavy jobs, not after the crash.** Before starting an OCR job or a large PDF batch, check available memory and either shrink the batch, warn the user, or offer the remote-execution escape valve.
+4. **Publish real hardware tiers** instead of one spec, mapped onto the S0–S3 tiers above:
+
+   | Tier | Hardware | What works locally |
+   |---|---|---|
+   | Minimum | 8 GB RAM, CPU only | S0 corpora, no OCR, semantic search or occasional rerank |
+   | Recommended | 16–32 GB RAM | Moderate corpora, OCR, full Adaptive retrieval |
+   | Power user | 64 GB+, GPU optional | Large corpora, concurrent ingestion |
+   | Beyond that | — | Route to the optional distributed/managed execution path rather than promise it runs on a laptop |
+
+5. **The remote-execution path is the hybrid escape valve, not the product's center of gravity.** Local stays the default; delegation exists for when local hardware is insufficient, not as the normal path.
+
+### Effect on the technology stack
+
+The table below assumes a desktop install uses the embedded-Postgres, in-process-queue variants; RabbitMQ and a networked Postgres remain the right choice only once a tenant is large enough, or distributed enough, to need them — the same "do not deploy every component on day one" rule already stated above.
+
 ## Incremental Indexing & Invalidation
 
 - Detect changed resources via content hashes, timestamps, or repository/webhook events.
@@ -260,7 +307,7 @@ The tier boundaries above are rules of thumb. A **distractor scaling test** repl
 | Summarization | Self-hosted open LLM with batch processing (not chosen yet) |
 | Observability | OpenTelemetry + token, latency and hardware-use metrics |
 
-Guiding rule: do not deploy every component on day one. PostgreSQL alone (metadata + hierarchy + full-text + vector) can carry the first version; OpenSearch/Neo4j/dedicated vector DB are introduced only once scale and retrieval benchmarks justify them.
+Guiding rule: do not deploy every component on day one. PostgreSQL alone (metadata + hierarchy + full-text + vector) can carry the first version; OpenSearch/Neo4j/dedicated vector DB are introduced only once scale and retrieval benchmarks justify them. For a desktop install specifically, see "Application Type & Deployment Model" above: RabbitMQ and a networked Postgres are deferred to the distributed/managed tier, not shipped by default.
 
 ## Architectural Cautions
 
