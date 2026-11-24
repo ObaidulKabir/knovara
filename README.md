@@ -25,6 +25,7 @@ src/
   Knovara.Api                      API gateway (ASP.NET Core Web API)
   Knovara.Cli                      Thin CLI over the API (no project reference to the server)
   Knovara.Mcp                      MCP server (stdio) exposing the API as tools to Claude and other MCP clients
+  Knovara.ControlPlane             SaaS control plane: accounts, tenants, desktop enrollment, installer downloads
   Knovara.Core                     Shared domain models + service contracts
   Knovara.Ingestion                RabbitMQ ingestion queue
   Knovara.KnowledgeRepresentation  Hierarchy validation + Postgres Resource & Knowledge Store (D1)
@@ -40,6 +41,8 @@ services/
   model-service                Self-hosted embeddings and reranking (FastAPI + fastembed, CPU)
 eval/
   run_benchmark.py             Retrieval benchmark over questions.json; reports in eval/results/
+installer/
+  build-installer.ps1          Builds the Windows desktop installer (Inno Setup)
 infra/
   docker-compose.yml           Postgres+pgvector, Redis, RabbitMQ, model service, API, worker
   postgres/                    Schema (init.sql), baked into the Postgres image
@@ -292,6 +295,99 @@ The API must be running (see "Run locally"). `knovara_ingest` takes URLs or file
 volume, not paths on the client machine; to add content you hold, use `knovara_upload_document` (text/markdown;
 the REST upload endpoint also takes pdf, docx, pptx and html). Over stdio the server only
 speaks to the local client that launched it; it opens no network port.
+
+## SaaS control plane
+
+`Knovara.ControlPlane` is the SaaS side of the hybrid, desktop-first design: it decides **who may use Knovara and
+from which machines**, while the retrieval engine (`Knovara.Api`) and the desktop app do the work. It is a
+self-hosted ASP.NET Core app with a server-rendered dashboard, using the same Postgres (its tables are all `cp_*`
+and are created at startup). The retrieval API never depends on it: a customer's knowledge is not touched when
+a tenant is removed from the control plane.
+
+```
+ operator / tenant admin ──▶ dashboard ── creates tenants, enrollment codes; revokes devices; publishes installers
+                                │
+ desktop app ──(code)──▶ POST /api/enroll ──▶ device id + secret   (secret stored DPAPI-protected on the PC)
+ desktop app ──(secret)─▶ POST /api/device/token ──▶ 15-minute JWT carrying the tenant
+ desktop app ──(JWT)───▶ Knovara.Api    (validates the JWT; the tenant comes only from the token)
+```
+
+**Roles.** A *platform* account (the operator) manages every tenant, account and installer release. A *tenant*
+account administers only its own tenant's devices and enrollment codes; every dashboard action is scoped by the
+signed-in account, never by a tenant id in the request, so a tampered link or form cannot reach another tenant.
+Sign-in uses local accounts (salted PBKDF2 hashes, 12+ character passwords, lockout for 15 minutes after 5 failures).
+
+**Enrollment.** An admin creates a one-time (or limited-use) code on the Enrollment codes page: tenant, validity
+(1-30 days), uses. The code (`KNV-XXXX-XXXX-XXXX`, ~59 bits) is shown once and stored only as a hash. In the
+desktop app, *Enroll with Knovara* takes the control plane address, the code and a name for the PC. A tenant can
+have a device limit; the Devices page lists every PC with its app version and last check-in and can revoke or
+restore it.
+
+**Revocation is not instant.** The API validates tokens statelessly, so a revoked device keeps working until
+its current token expires, at most `Tokens:LifetimeMinutes` (default 15). It is refused a new token immediately.
+
+### Run it
+
+```powershell
+# one key shared by the control plane (signs) and the API (validates); keep it secret, 32+ bytes
+$key = [Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }) -as [byte[]])
+
+# control plane (Postgres must be running; see "Run locally")
+$env:Tokens__SigningKey = $key
+$env:DataPlane__BaseUrl = "http://localhost:5299"          # where enrolled desktops are told to send requests
+$env:Bootstrap__AdminEmail = "you@example.com"             # first platform account; only used when none exist
+$env:Bootstrap__AdminPassword = "<12+ characters>"
+dotnet run --project src/Knovara.ControlPlane --urls http://localhost:5400
+
+# the API must validate those tokens: same key, issuer and audience
+$env:Authentication__Enabled = "true"
+$env:Authentication__SigningKey = $key
+$env:Authentication__Issuer = "knovara-control-plane"
+$env:Authentication__Audience = "knovara-api"
+dotnet run --project src/Knovara.Api
+```
+
+Open `http://localhost:5400`, sign in, create a tenant, then create an enrollment code for it. With Docker:
+`docker compose -f infra/docker-compose.yml --profile saas up -d control-plane` (set `TOKEN_SIGNING_KEY`,
+`CONTROL_PLANE_ADMIN_EMAIL`, `CONTROL_PLANE_ADMIN_PASSWORD`). Remove the bootstrap settings after the first start.
+`Tokens:SigningKey` is required and checked at startup; the dashboard cookie is `Secure` whenever the request is
+HTTPS, so **serve it over HTTPS (a reverse proxy is enough) before exposing it**.
+
+Desktop-facing endpoints (JSON, no cookie): `POST /api/enroll` `{ code, deviceName, appVersion, os }`,
+`POST /api/device/token` `{ deviceId, deviceSecret, appVersion, os }` (both return the API address, a token and the
+newest published installer version), `GET /api/releases/latest` (public version metadata). Enrollment is rate limited
+per IP and answers an unknown, expired, revoked or used-up code identically.
+
+### Desktop installer
+
+The dashboard's **Downloads** page lists published installers with their SHA-256; any signed-in user can download
+one, and the operator uploads new versions (`.exe`, `.msi` or `.zip`) and chooses which is current. Build one with:
+
+```powershell
+.\installer\build-installer.ps1 -Version 1.1.0 -ControlPlaneUrl https://control.example.com
+```
+
+That publishes the app self-contained (users do not need .NET), then compiles `installer/knovara.iss` with
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) (free) into `artifacts/installer/Knovara-Desktop-Setup-1.1.0.exe`.
+It installs per user (no administrator rights), adds a Start Menu entry and uninstaller, and pre-fills the
+enrollment screen with `-ControlPlaneUrl` so users only need their code. Uninstalling keeps the enrollment, so
+upgrades do not make anyone enroll again. A running app shows *Update available* when the control plane has a newer
+current version than the one installed.
+
+**The installer is not code-signed**, so Windows SmartScreen warns on first run until you sign it with a certificate
+you buy; the dashboard publishes checksums so downloads can at least be verified.
+
+### Known limits
+
+- **Turning on API authentication currently breaks ingestion.** The document worker calls the API without a
+  credential, so with `Authentication:Enabled` its callbacks get `401`. Retrieval and management from enrolled
+  desktops work; ingesting does not until the worker gets a service credential.
+- **The MCP server and CLI have no credential of their own.** With authentication on they need `KNOVARA_JWT`, and a
+  device token only lasts 15 minutes. They need service tokens (or API keys) issued from the dashboard.
+- Tokens are signed with one shared symmetric key (HS256) known to both services; fine for one deployment, replace
+  it with an asymmetric key pair before several parties validate tokens.
+- No password-reset email: a forgotten password needs the operator (or a database edit). There is no tenant
+  deletion or self-service sign-up on purpose.
 
 ## Run locally
 

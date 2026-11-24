@@ -94,6 +94,35 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # The SaaS control plane: accounts, tenants, desktop enrollment and installer downloads.
+  # Not started by default; run it with:  docker compose --profile saas up -d control-plane
+  # It needs TOKEN_SIGNING_KEY (32+ bytes, the SAME value as the API's Authentication__SigningKey) and, on first
+  # start, CONTROL_PLANE_ADMIN_EMAIL / CONTROL_PLANE_ADMIN_PASSWORD to create the first operator account.
+  # Put it behind HTTPS before exposing it: it sets a sign-in cookie and hands out credentials.
+  control-plane:
+    profiles: ["saas"]
+    build:
+      context: ..
+      dockerfile: src/Knovara.ControlPlane/Dockerfile
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Database=knovara;Username=knovara;Password=${POSTGRES_PASSWORD:-knovara_dev_password};GSS Encryption Mode=Disable"
+      Tokens__SigningKey: "${TOKEN_SIGNING_KEY:-}"
+      Tokens__Issuer: "knovara-control-plane"
+      Tokens__Audience: "knovara-api"
+      # Where enrolled desktops are told to send requests: the API's address as the desktops see it.
+      DataPlane__BaseUrl: "${DATA_PLANE_PUBLIC_URL:-http://localhost:5000}"
+      Bootstrap__AdminEmail: "${CONTROL_PLANE_ADMIN_EMAIL:-}"
+      Bootstrap__AdminPassword: "${CONTROL_PLANE_ADMIN_PASSWORD:-}"
+      ASPNETCORE_URLS: "http://+:8080"
+    ports:
+      - "${CONTROL_PLANE_HOST_PORT:-5400}:8080"
+    volumes:
+      - control_plane_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   sources:
+  control_plane_data:

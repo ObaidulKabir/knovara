@@ -1,0 +1,106 @@
+@page
+@attribute [RequestSizeLimit(629145600)]
+@attribute [RequestFormLimits(MultipartBodyLengthLimit = 629145600)]
+@inject IControlPlaneStore Store
+@inject ReleaseService Releases
+@{
+    ViewData["Title"] = "Downloads";
+    var me = Principal.From(User)!;
+    var list = await Store.ListReleasesAsync(HttpContext.RequestAborted);
+}
+
+<h1>Downloads</h1>
+<p class="sub">Knovara Desktop installers. After installing, enroll the app with a code from your administrator.</p>
+
+@if (Message is not null) { <div class="notice @(Failed ? "err" : "ok")">@Message</div> }
+
+<table>
+    <thead><tr><th>Version</th><th>File</th><th class="num">Size</th><th>SHA-256</th><th>Published</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var r in list)
+    {
+        <tr>
+            <td><strong>@r.Version</strong> @if (r.IsCurrent) { <span class="pill ok">current</span> }
+                @if (r.Notes is not null) { <div class="muted">@r.Notes</div> }</td>
+            <td><a href="/download/@r.ReleaseId">@r.FileName</a></td>
+            <td class="num">@(r.SizeBytes < 1024 * 1024 ? $"{r.SizeBytes / 1024} KB" : $"{r.SizeBytes / (1024.0 * 1024):0.#} MB")</td>
+            <td class="mono">@r.Sha256</td>
+            <td>@r.UploadedAt.ToString("yyyy-MM-dd")</td>
+            <td>
+                @if (me.IsPlatform)
+                {
+                    @if (!r.IsCurrent)
+                    {
+                        <form method="post" asp-page-handler="MakeCurrent"><input type="hidden" name="releaseId" value="@r.ReleaseId" /><button type="submit">Make current</button></form>
+                    }
+                    <form method="post" asp-page-handler="Delete" onsubmit="return confirm('Delete version @r.Version? Its file is removed.');">
+                        <input type="hidden" name="releaseId" value="@r.ReleaseId" /><button class="danger" type="submit">Delete</button>
+                    </form>
+                }
+            </td>
+        </tr>
+    }
+    @if (list.Count == 0) { <tr><td colspan="6" class="empty">No installer has been published yet.</td></tr> }
+    </tbody>
+</table>
+<p class="muted">Check a download with <code>Get-FileHash .\&lt;file&gt; -Algorithm SHA256</code> and compare it to the value above.
+    The installer is not code-signed, so Windows SmartScreen may warn on first run.</p>
+
+@if (me.IsPlatform)
+{
+    <h2>Publish a new version</h2>
+    <form method="post" enctype="multipart/form-data" class="inline card" asp-page-handler="Upload">
+        <label>Version <input name="version" placeholder="1.0.0" pattern="\d{1,4}\.\d{1,4}\.\d{1,4}(-[0-9A-Za-z.\-]{1,20})?" required style="width:120px" /></label>
+        <label>Notes (optional) <input name="notes" maxlength="200" style="width:260px" /></label>
+        <label>Installer (.exe, .msi or .zip) <input type="file" name="installer" accept=".exe,.msi,.zip" required /></label>
+        <button class="primary" type="submit">Upload</button>
+    </form>
+}
+
+@functions {
+    public string? Message { get; set; }
+    public bool Failed { get; set; }
+
+    public void OnGet()
+    {
+        Message = TempData["Msg"] as string;
+        Failed = TempData["Failed"] is true;
+    }
+
+    public async Task<IActionResult> OnPostUploadAsync(string? version, string? notes, IFormFile? installer)
+    {
+        if (!Principal.From(User)!.IsPlatform) return Forbid();
+        if (installer is null || installer.Length == 0) return Fail("Choose an installer file.");
+
+        await using var stream = installer.OpenReadStream();
+        var result = await Releases.AddAsync(stream, installer.FileName, version, notes, Principal.From(User)!.Email, HttpContext.RequestAborted);
+
+        return result.Outcome switch
+        {
+            AddReleaseOutcome.Added => Ok($"Published {version}."),
+            AddReleaseOutcome.InvalidVersion => Fail("Version must look like 1.2.3 or 1.2.3-beta."),
+            AddReleaseOutcome.InvalidFile => Fail("The file must be a non-empty .exe, .msi or .zip."),
+            AddReleaseOutcome.TooLarge => Fail("That file is larger than the upload limit."),
+            _ => Fail($"Version {version} already exists. Delete it first or use a new version number.")
+        };
+    }
+
+    public async Task<IActionResult> OnPostMakeCurrentAsync(string? releaseId)
+    {
+        if (!Principal.From(User)!.IsPlatform) return Forbid();
+        if (string.IsNullOrWhiteSpace(releaseId) || await Store.GetReleaseAsync(releaseId, HttpContext.RequestAborted) is null) return NotFound();
+
+        await Store.SetCurrentReleaseAsync(releaseId, HttpContext.RequestAborted);
+        return Ok("Current version updated.");
+    }
+
+    public async Task<IActionResult> OnPostDeleteAsync(string? releaseId)
+    {
+        if (!Principal.From(User)!.IsPlatform) return Forbid();
+        return !string.IsNullOrWhiteSpace(releaseId) && await Releases.DeleteAsync(releaseId, HttpContext.RequestAborted)
+            ? Ok("Version deleted.") : NotFound();
+    }
+
+    private IActionResult Ok(string message) { TempData["Msg"] = message; return RedirectToPage(); }
+    private IActionResult Fail(string message) { TempData["Msg"] = message; TempData["Failed"] = true; return RedirectToPage(); }
+}

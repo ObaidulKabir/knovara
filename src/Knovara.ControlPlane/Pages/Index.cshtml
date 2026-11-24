@@ -1,0 +1,50 @@
+@page
+@inject IControlPlaneStore Store
+@{
+    ViewData["Title"] = "Overview";
+    var me = Principal.From(User)!;
+    var tenants = await Store.ListTenantsAsync(me.IsPlatform ? null : me.TenantId, HttpContext.RequestAborted);
+    var current = await Store.GetCurrentReleaseAsync(HttpContext.RequestAborted);
+}
+
+<h1>Overview</h1>
+<p class="sub">@(me.IsPlatform ? "Every tenant on this deployment." : "Your organization's registered desktops.")</p>
+
+<table>
+    <thead>
+        <tr><th>Tenant</th><th>Name</th><th class="num">Active devices</th><th></th></tr>
+    </thead>
+    <tbody>
+    @foreach (var t in tenants)
+    {
+        <tr>
+            <td class="mono">@t.TenantId</td>
+            <td>@t.Name</td>
+            <td class="num">@t.ActiveDevices@(t.DeviceLimit is { } l ? $" / {l}" : "")</td>
+            <td>
+                <a href="/Devices?tenant=@t.TenantId">Devices</a> ·
+                <a href="/Codes?tenant=@t.TenantId">Enrollment codes</a>
+            </td>
+        </tr>
+    }
+    @if (tenants.Count == 0)
+    {
+        <tr><td colspan="4" class="empty">@(me.IsPlatform ? "No tenants yet. Create one on the Tenants page." : "No tenant found for this account.")</td></tr>
+    }
+    </tbody>
+</table>
+
+<h2>Desktop installer</h2>
+<div class="card">
+    @if (current is null)
+    {
+        <span class="muted">No installer has been published yet.@(me.IsPlatform ? " Upload one on the Downloads page." : "")</span>
+    }
+    else
+    {
+        <strong>Knovara Desktop @current.Version</strong>
+        <span class="muted"> · @(current.SizeBytes / (1024 * 1024)) MB</span>
+        <div><a class="btn primary" style="display:inline-block;margin-top:10px" href="/download/@current.ReleaseId">Download installer</a>
+        <a href="/Downloads" style="margin-left:12px">All versions and checksums</a></div>
+    }
+</div>

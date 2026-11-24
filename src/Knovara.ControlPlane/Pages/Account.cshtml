@@ -1,0 +1,42 @@
+@page
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject AccountService Accounts
+@{
+    ViewData["Title"] = "Account";
+    var me = Principal.From(User)!;
+}
+
+<h1>Account</h1>
+<p class="sub">@me.Email · @(me.IsPlatform ? "platform administrator" : $"administrator of {me.TenantId}")</p>
+
+@if (Message is not null) { <div class="notice @(Failed ? "err" : "ok")">@Message</div> }
+
+<div class="card">
+    <h2 style="margin-top:0">Change password</h2>
+    <form method="post" class="inline" asp-page-handler="ChangePassword">
+        <label>Current password <input type="password" name="Current" autocomplete="current-password" required /></label>
+        <label>New password <input type="password" name="Replacement" autocomplete="new-password" minlength="12" required /></label>
+        <button class="primary" type="submit">Change password</button>
+    </form>
+    <p class="muted">At least @AccountService.MinPasswordLength characters.</p>
+</div>
+
+@functions {
+    public string? Message { get; set; }
+    public bool Failed { get; set; }
+
+    public async Task<IActionResult> OnPostChangePasswordAsync(string? current, string? replacement)
+    {
+        var problem = await Accounts.ChangePasswordAsync(Principal.From(User)!.AccountId, current, replacement, HttpContext.RequestAborted);
+        Failed = problem is not null;
+        Message = problem ?? "Password changed.";
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostLogoutAsync()
+    {
+        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        return Redirect("/Login");
+    }
+}

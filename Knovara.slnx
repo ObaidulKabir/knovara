@@ -7,6 +7,8 @@
     <Project Path="src/Knovara.Common/Knovara.Common.csproj" />
     <Project Path="src/Knovara.ContextMemory/Knovara.ContextMemory.csproj" />
     <Project Path="src/Knovara.ContextOptimization/Knovara.ContextOptimization.csproj" />
+    <Project Path="src/Knovara.ControlPlane.Tests/Knovara.ControlPlane.Tests.csproj" />
+    <Project Path="src/Knovara.ControlPlane/Knovara.ControlPlane.csproj" />
     <Project Path="src/Knovara.Core/Knovara.Core.csproj" />
     <Project Path="src/Knovara.Desktop/Knovara.Desktop.csproj" />
     <Project Path="src/Knovara.Evaluation/Knovara.Evaluation.csproj" />

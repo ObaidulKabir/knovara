@@ -20,7 +20,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
                     <TextBlock Text="Knovara Desktop" FontSize="20" FontWeight="Bold" Foreground="#0F172A"/>
-                    <TextBlock x:Name="ConnectionInfoText" Text="Connecting..." FontSize="12" Foreground="#64748B" Margin="0,3,0,0"/>
+                    <TextBlock x:Name="ConnectionInfoText" Text="Connecting..." FontSize="12" Foreground="#64748B" Margin="0,3,10,0" TextWrapping="Wrap"/>
                 </StackPanel>
                 <Button Grid.Column="1" Content="Disconnect / Switch Tenant" Click="OnDisconnectClicked"
                         Background="#F1F5F9" Foreground="#334155" BorderBrush="#CBD5E1" BorderThickness="1" 

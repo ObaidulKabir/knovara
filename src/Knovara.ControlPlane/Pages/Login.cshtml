@@ -1,0 +1,61 @@
+@page
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject AccountService Accounts
+@{
+    ViewData["Title"] = "Sign in";
+}
+
+<div class="login card">
+    <h1>Sign in</h1>
+    <p class="sub">Knovara control plane</p>
+    @if (Error is not null) { <div class="notice err">@Error</div> }
+    <form method="post">
+        <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
+        <label>Email <input name="Email" type="email" value="@Email" autocomplete="username" required autofocus /></label>
+        <label>Password <input name="Password" type="password" autocomplete="current-password" required /></label>
+        <button class="primary" type="submit">Sign in</button>
+    </form>
+</div>
+
+@functions {
+    [BindProperty] public string? Email { get; set; }
+    [BindProperty] public string? Password { get; set; }
+    [BindProperty(SupportsGet = true)] public string? ReturnUrl { get; set; }
+    public string? Error { get; set; }
+
+    public IActionResult OnGet() => User.Identity?.IsAuthenticated == true ? Redirect("/") : Page();
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        var result = await Accounts.SignInAsync(Email, Password, HttpContext.RequestAborted);
+
+        if (result.Outcome == SignInOutcome.LockedOut)
+        {
+            Error = "Too many failed attempts. Try again in 15 minutes.";
+            return Page();
+        }
+        if (result.Outcome != SignInOutcome.Success)
+        {
+            Error = "Wrong email or password.";
+            return Page();
+        }
+
+        var account = result.Account!;
+        var claims = new List<Claim>
+        {
+            new(Principal.AccountClaim, account.AccountId),
+            new(ClaimTypes.Email, account.Email),
+            new(ClaimTypes.Role, account.Role)
+        };
+        if (account.TenantId is not null) claims.Add(new Claim(Principal.TenantClaim, account.TenantId));
+
+        await HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
+
+        // Only ever redirect back to a path on this site, never to an address a link could smuggle in.
+        return LocalRedirect(Url.IsLocalUrl(ReturnUrl) ? ReturnUrl! : "/");
+    }
+}

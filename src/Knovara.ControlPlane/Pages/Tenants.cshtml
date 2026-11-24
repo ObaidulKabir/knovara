@@ -1,0 +1,102 @@
+@page
+@inject IControlPlaneStore Store
+@inject AccountService Accounts
+@{
+    ViewData["Title"] = "Tenants";
+    var tenants = await Store.ListTenantsAsync(null, HttpContext.RequestAborted);
+    var accounts = await Store.ListAccountsAsync(null, HttpContext.RequestAborted);
+}
+
+<h1>Tenants</h1>
+<p class="sub">A tenant is one customer organization. Its id is what the retrieval API filters every request by.</p>
+
+@if (Message is not null) { <div class="notice @(Failed ? "err" : "ok")">@Message</div> }
+
+<table>
+    <thead><tr><th>Tenant id</th><th>Name</th><th class="num">Devices</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var t in tenants)
+    {
+        <tr>
+            <td class="mono">@t.TenantId</td>
+            <td>@t.Name</td>
+            <td class="num">@t.ActiveDevices@(t.DeviceLimit is { } l ? $" / {l}" : " (no limit)")</td>
+            <td><a href="/Devices?tenant=@t.TenantId">Devices</a> · <a href="/Codes?tenant=@t.TenantId">Enrollment codes</a></td>
+        </tr>
+    }
+    @if (tenants.Count == 0) { <tr><td colspan="4" class="empty">No tenants yet.</td></tr> }
+    </tbody>
+</table>
+
+<h2>Create a tenant</h2>
+<form method="post" class="inline card" asp-page-handler="CreateTenant">
+    <label>Tenant id <input name="tenantId" placeholder="acme" pattern="[a-z0-9][a-z0-9_-]{1,62}" required title="lowercase letters, digits, - and _ (2-63 characters)" /></label>
+    <label>Name <input name="name" placeholder="Acme Corp" required maxlength="100" /></label>
+    <label>Device limit <input name="deviceLimit" type="number" min="1" placeholder="none" style="width:110px" /></label>
+    <button class="primary" type="submit">Create tenant</button>
+</form>
+
+<h2>Accounts</h2>
+<table>
+    <thead><tr><th>Email</th><th>Role</th><th>Tenant</th></tr></thead>
+    <tbody>
+    @foreach (var a in accounts)
+    {
+        <tr><td>@a.Email</td><td><span class="pill">@a.Role</span></td><td class="mono">@(a.TenantId ?? "—")</td></tr>
+    }
+    </tbody>
+</table>
+
+<h2>Add a tenant administrator</h2>
+<form method="post" class="inline card" asp-page-handler="CreateAdmin">
+    <label>Tenant
+        <select name="tenantId" required>
+            @foreach (var t in tenants) { <option value="@t.TenantId">@t.TenantId</option> }
+        </select>
+    </label>
+    <label>Email <input name="email" type="email" required /></label>
+    <label>Temporary password <input name="password" type="password" minlength="12" autocomplete="new-password" required /></label>
+    <button class="primary" type="submit">Add administrator</button>
+</form>
+
+@functions {
+    public string? Message { get; set; }
+    public bool Failed { get; set; }
+
+    public void OnGet()
+    {
+        Message = TempData["Msg"] as string;
+        Failed = TempData["Failed"] is true;
+    }
+
+    public async Task<IActionResult> OnPostCreateTenantAsync(string? tenantId, string? name, int? deviceLimit)
+    {
+        var id = tenantId?.Trim().ToLowerInvariant();
+        if (!TenantScope.IsValidTenantId(id) || string.IsNullOrWhiteSpace(name) || deviceLimit is <= 0)
+        {
+            return Fail("Tenant id must be 2-63 lowercase letters, digits, '-' or '_'; a name is required; a device limit must be positive.");
+        }
+
+        return await Store.CreateTenantAsync(id!, name.Trim(), deviceLimit, HttpContext.RequestAborted)
+            ? Ok($"Created tenant '{id}'.")
+            : Fail($"A tenant with id '{id}' already exists.");
+    }
+
+    public async Task<IActionResult> OnPostCreateAdminAsync(string? tenantId, string? email, string? password)
+    {
+        if (await Store.GetTenantAsync(tenantId ?? "", HttpContext.RequestAborted) is null) return Fail("Choose an existing tenant.");
+
+        var outcome = await Accounts.CreateAsync(email, password, Roles.Tenant, tenantId, HttpContext.RequestAborted);
+        return outcome switch
+        {
+            CreateAccountOutcome.Created => Ok($"Added {email!.Trim().ToLowerInvariant()} as administrator of '{tenantId}'. Share the temporary password securely; they can change it under Account."),
+            CreateAccountOutcome.EmailTaken => Fail("That email already has an account."),
+            CreateAccountOutcome.InvalidEmail => Fail("Enter a valid email address."),
+            _ => Fail(AccountService.PasswordProblem(password, email) ?? "That password is not acceptable.")
+        };
+    }
+
+    // Post/redirect/get: refreshing the page after a form submit must not submit it again.
+    private IActionResult Ok(string message) { TempData["Msg"] = message; return RedirectToPage(); }
+    private IActionResult Fail(string message) { TempData["Msg"] = message; TempData["Failed"] = true; return RedirectToPage(); }
+}

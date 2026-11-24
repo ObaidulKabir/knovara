@@ -1,0 +1,121 @@
+@page
+@inject IControlPlaneStore Store
+@inject TimeProvider Clock
+@{
+    ViewData["Title"] = "Enrollment codes";
+    var now = Clock.GetUtcNow().UtcDateTime;
+    var fresh = TempData["NewCode"] as string;
+}
+
+@if (TenantInfo is not null)
+{
+    <h1>Enrollment codes</h1>
+    <p class="sub"><span class="mono">@TenantInfo.TenantId</span> · @TenantInfo.Name · <a href="/Devices?tenant=@TenantInfo.TenantId">Devices</a></p>
+
+    @if (fresh is not null)
+    {
+        <div class="card">
+            <strong>New enrollment code</strong>
+            <div><span class="secret">@fresh</span></div>
+            <p class="muted" style="margin:0">Copy it now: only a hash is stored, so it cannot be shown again. In the desktop app choose
+                <em>Enroll with Knovara</em>, then enter the control plane address and this code.</p>
+        </div>
+    }
+    @if (Message is not null) { <div class="notice @(Failed ? "err" : "ok")">@Message</div> }
+
+    <form method="post" class="inline card" asp-page-handler="Create">
+        <input type="hidden" name="tenant" value="@TenantInfo.TenantId" />
+        <label>Label (optional) <input name="label" maxlength="80" placeholder="e.g. Sam's laptop" /></label>
+        <label>Valid for (days) <input name="days" type="number" min="1" max="30" value="7" style="width:90px" /></label>
+        <label>Uses <input name="maxUses" type="number" min="1" max="100" value="1" style="width:80px" /></label>
+        <button class="primary" type="submit">Create code</button>
+    </form>
+
+    <table>
+        <thead><tr><th>Label</th><th>Created</th><th>Expires</th><th>Used</th><th>State</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var c in Codes)
+        {
+            var state = c.State(now);
+            <tr>
+                <td>@(c.Label ?? "—")<div class="mono muted">@c.CodeId[..8]</div></td>
+                <td>@c.CreatedAt.ToString("yyyy-MM-dd HH:mm") UTC</td>
+                <td>@c.ExpiresAt.ToString("yyyy-MM-dd HH:mm") UTC</td>
+                <td class="num">@c.Uses / @c.MaxUses</td>
+                <td><span class="pill @(state == "valid" ? "ok" : "warn")">@state</span></td>
+                <td>
+                    @if (state == "valid")
+                    {
+                        <form method="post" asp-page-handler="Revoke">
+                            <input type="hidden" name="tenant" value="@TenantInfo.TenantId" />
+                            <input type="hidden" name="codeId" value="@c.CodeId" />
+                            <button class="danger" type="submit">Revoke</button>
+                        </form>
+                    }
+                </td>
+            </tr>
+        }
+        @if (Codes.Count == 0) { <tr><td colspan="6" class="empty">No enrollment codes yet.</td></tr> }
+        </tbody>
+    </table>
+}
+
+@functions {
+    [BindProperty(SupportsGet = true)] public string? Tenant { get; set; }
+    public Tenant? TenantInfo { get; set; }
+    public IReadOnlyList<EnrollmentCode> Codes { get; set; } = [];
+    public string? Message { get; set; }
+    public bool Failed { get; set; }
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        Message = TempData["Msg"] as string;
+        return await LoadAsync() ?? Page();
+    }
+
+    public async Task<IActionResult> OnPostCreateAsync(string? label, int days = 7, int maxUses = 1)
+    {
+        if (await LoadAsync() is { } denied) return denied;
+
+        if (days is < 1 or > 30 || maxUses is < 1 or > 100)
+        {
+            Failed = true;
+            Message = "Validity must be 1-30 days and uses 1-100.";
+            return await ReloadAsync();
+        }
+
+        var code = EnrollmentCodes.Generate();
+        var expires = Clock.GetUtcNow().UtcDateTime.AddDays(days);
+        var cleanLabel = string.IsNullOrWhiteSpace(label) ? null : label.Trim()[..Math.Min(80, label.Trim().Length)];
+        await Store.CreateCodeAsync(Guid.NewGuid().ToString("n"), TenantInfo!.TenantId,
+            EnrollmentCodes.Hash(EnrollmentCodes.Normalize(code)!), cleanLabel, Principal.From(User)!.Email, expires, maxUses, HttpContext.RequestAborted);
+
+        // Post/redirect/get, carrying the code in TempData so a refresh cannot create a second one.
+        TempData["NewCode"] = code;
+        return RedirectToPage(new { tenant = TenantInfo.TenantId });
+    }
+
+    public async Task<IActionResult> OnPostRevokeAsync(string? codeId)
+    {
+        if (await LoadAsync() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(codeId) || !await Store.RevokeCodeAsync(TenantInfo!.TenantId, codeId, HttpContext.RequestAborted)) return NotFound();
+
+        TempData["Msg"] = "Code revoked.";
+        return RedirectToPage(new { tenant = TenantInfo.TenantId });
+    }
+
+    private async Task<IActionResult> ReloadAsync() => await LoadAsync() ?? Page();
+
+    /// <returns>null when loaded; otherwise the response to send instead.</returns>
+    private async Task<IActionResult?> LoadAsync()
+    {
+        var me = Principal.From(User)!;
+        if (!TenantScope.TryResolve(me, Tenant, out var tenantId)) return me.IsPlatform ? Redirect("/Tenants") : NotFound();
+
+        TenantInfo = await Store.GetTenantAsync(tenantId, HttpContext.RequestAborted);
+        if (TenantInfo is null) return NotFound();
+
+        Codes = await Store.ListCodesAsync(tenantId, HttpContext.RequestAborted);
+        return null;
+    }
+}

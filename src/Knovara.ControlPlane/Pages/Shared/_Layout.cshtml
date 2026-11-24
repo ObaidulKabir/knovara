@@ -1,0 +1,35 @@
+@{
+    var me = Principal.From(User);
+}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(ViewData["Title"] ?? "Knovara") · Knovara Control Plane</title>
+    <link rel="stylesheet" href="~/site.css" />
+</head>
+<body>
+<header class="top">
+    <a class="brand" href="/">Knovara <span>Control Plane</span></a>
+    @if (me is not null)
+    {
+        <nav>
+            <a href="/">Overview</a>
+            @if (me.IsPlatform) { <a href="/Tenants">Tenants</a> }
+            else { <a href="/Devices">Devices</a><a href="/Codes">Enrollment codes</a> }
+            <a href="/Downloads">Downloads</a>
+        </nav>
+        <div class="who">
+            <a href="/Account" title="Account settings">@me.Email</a>
+            <span class="pill">@(me.IsPlatform ? "platform" : me.TenantId)</span>
+            <form method="post" asp-page="/Account" asp-page-handler="Logout"><button class="link" type="submit">Sign out</button></form>
+        </div>
+    }
+</header>
+<main>
+    @RenderBody()
+</main>
+<footer>Knovara · self-hosted control plane</footer>
+</body>
+</html>

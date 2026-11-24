@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using Knovara.Common;
+using Knovara.Common.Device;
 using Microsoft.Win32;
 
 namespace Knovara.Desktop
@@ -74,7 +75,12 @@ namespace Knovara.Desktop
         private readonly ObservableCollection<ContextDocItem> _contextDocuments = new();
         private readonly ObservableCollection<ManagedResourceItem> _managedResources = new();
 
-        public MainWindow(string baseUrl, string tenantId, string jwtToken)
+        /// <summary>An enrolled device: the tenant and API address come from the control plane, and tokens refresh themselves.</summary>
+        public MainWindow(DeviceTokenProvider tokens) : this(tokens.ApiBaseUrl, tokens.TenantId, string.Empty, tokens)
+        {
+        }
+
+        public MainWindow(string baseUrl, string tenantId, string jwtToken, DeviceTokenProvider? tokens = null)
         {
             InitializeComponent();
 
@@ -82,21 +88,27 @@ namespace Knovara.Desktop
             _tenantId = tenantId;
             _jwtToken = jwtToken;
 
-            _http = new HttpClient
-            {
-                BaseAddress = new Uri(_baseUrl + "/"),
-                // Ask scores every chunk of every attached document on CPU; an attached folder can take
-                // well over the 30s that was enough for a single file.
-                Timeout = TimeSpan.FromSeconds(180)
-            };
+            // An enrolled device sends its own short-lived token on every request; the handler refreshes it before it expires.
+            _http = tokens is null
+                ? new HttpClient()
+                : new HttpClient(new BearerTokenHandler(tokens) { InnerHandler = new HttpClientHandler() });
+            _http.BaseAddress = new Uri(_baseUrl + "/");
+            // Ask scores every chunk of every attached document on CPU; an attached folder can take
+            // well over the 30s that was enough for a single file.
+            _http.Timeout = TimeSpan.FromSeconds(180);
             _http.DefaultRequestHeaders.Add("X-Tenant-Id", _tenantId);
-            if (!string.IsNullOrWhiteSpace(_jwtToken))
+            if (tokens is null && !string.IsNullOrWhiteSpace(_jwtToken))
             {
                 _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _jwtToken);
             }
 
-            var authMode = string.IsNullOrWhiteSpace(_jwtToken) ? "No JWT (Header Dev Mode)" : "Authenticated (JWT Bearer)";
+            var authMode = tokens is not null ? "Enrolled device (token refreshes automatically)"
+                : string.IsNullOrWhiteSpace(_jwtToken) ? "No JWT (Header Dev Mode)" : "Authenticated (JWT Bearer)";
             ConnectionInfoText.Text = $"Connected to {_baseUrl} | Tenant: {_tenantId} | Auth: {authMode}";
+            if (tokens is not null && AppInfo.IsNewerThanThisBuild(tokens.LatestVersion))
+            {
+                ConnectionInfoText.Text += $" | Update available: {tokens.LatestVersion} (you have {AppInfo.Version}) - download it from {tokens.ControlPlaneUrl}/Downloads";
+            }
 
             ContextDocsListBox.ItemsSource = _contextDocuments;
             UpdateContextSummary();

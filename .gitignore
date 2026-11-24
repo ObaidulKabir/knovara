@@ -23,3 +23,7 @@ chat history.docx
 # Worker source folder: only the samples are tracked
 sources/*
 !sources/samples/
+
+# Installer build output and control-plane runtime data
+artifacts/
+src/Knovara.ControlPlane/data/

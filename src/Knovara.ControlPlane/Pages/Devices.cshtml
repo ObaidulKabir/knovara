@@ -1,0 +1,97 @@
+@page
+@inject IControlPlaneStore Store
+@{
+    ViewData["Title"] = "Devices";
+}
+
+@if (TenantInfo is not null)
+{
+    <h1>Devices</h1>
+    <p class="sub">
+        <span class="mono">@TenantInfo.TenantId</span> · @TenantInfo.Name ·
+        @TenantInfo.ActiveDevices@(TenantInfo.DeviceLimit is { } l ? $" of {l}" : "") active
+        · <a href="/Codes?tenant=@TenantInfo.TenantId">Create an enrollment code</a>
+    </p>
+
+    @if (Message is not null) { <div class="notice ok">@Message</div> }
+
+    <table>
+        <thead><tr><th>Device</th><th>Status</th><th>Enrolled</th><th>Last seen</th><th>App</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var d in DeviceList)
+        {
+            <tr>
+                <td>@d.Name<div class="mono muted">@d.DeviceId</div></td>
+                <td><span class="pill @(d.Status == DeviceStatus.Active ? "ok" : "bad")">@d.Status</span></td>
+                <td>@d.EnrolledAt.ToString("yyyy-MM-dd HH:mm") UTC</td>
+                <td>@(d.LastSeenAt is { } ls ? ls.ToString("yyyy-MM-dd HH:mm") + " UTC" : "never")</td>
+                <td>@(d.AppVersion ?? "—")<div class="muted">@d.Os</div></td>
+                <td>
+                    @if (d.Status == DeviceStatus.Active)
+                    {
+                        <form method="post" asp-page-handler="Revoke" onsubmit="return confirm('Revoke this device? It will stop working within a few minutes.');">
+                            <input type="hidden" name="tenant" value="@TenantInfo.TenantId" />
+                            <input type="hidden" name="deviceId" value="@d.DeviceId" />
+                            <button class="danger" type="submit">Revoke</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <form method="post" asp-page-handler="Restore">
+                            <input type="hidden" name="tenant" value="@TenantInfo.TenantId" />
+                            <input type="hidden" name="deviceId" value="@d.DeviceId" />
+                            <button type="submit">Restore</button>
+                        </form>
+                    }
+                </td>
+            </tr>
+        }
+        @if (DeviceList.Count == 0) { <tr><td colspan="6" class="empty">No desktops have enrolled yet. Create an enrollment code and enter it in the desktop app.</td></tr> }
+        </tbody>
+    </table>
+    <p class="muted">Revoking blocks a device from getting new access tokens; the one it already holds expires within @Minutes minutes.</p>
+}
+
+@functions {
+    [BindProperty(SupportsGet = true)] public string? Tenant { get; set; }
+    public Tenant? TenantInfo { get; set; }
+    public IReadOnlyList<Device> DeviceList { get; set; } = [];
+    public string? Message { get; set; }
+    public int Minutes => HttpContext.RequestServices.GetRequiredService<TokenOptions>().LifetimeMinutes;
+
+    public async Task<IActionResult> OnGetAsync()
+    {
+        Message = TempData["Msg"] as string;
+        return await LoadAsync() ?? Page();
+    }
+
+    public async Task<IActionResult> OnPostRevokeAsync(string? deviceId) => await ChangeAsync(deviceId, DeviceStatus.Revoked, "Revoked");
+
+    public async Task<IActionResult> OnPostRestoreAsync(string? deviceId) => await ChangeAsync(deviceId, DeviceStatus.Active, "Restored");
+
+    private async Task<IActionResult> ChangeAsync(string? deviceId, string status, string verb)
+    {
+        // The tenant comes from TenantScope, so the device id is only ever looked up inside the caller's own tenant.
+        if (await LoadAsync() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(deviceId) || !await Store.SetDeviceStatusAsync(TenantInfo!.TenantId, deviceId, status, HttpContext.RequestAborted))
+        {
+            return NotFound();
+        }
+
+        TempData["Msg"] = $"{verb} device {deviceId}.";
+        return RedirectToPage(new { tenant = TenantInfo.TenantId });
+    }
+
+    /// <returns>null when loaded; otherwise the response to send instead.</returns>
+    private async Task<IActionResult?> LoadAsync()
+    {
+        var me = Principal.From(User)!;
+        if (!TenantScope.TryResolve(me, Tenant, out var tenantId)) return me.IsPlatform ? Redirect("/Tenants") : NotFound();
+
+        TenantInfo = await Store.GetTenantAsync(tenantId, HttpContext.RequestAborted);
+        if (TenantInfo is null) return NotFound();
+
+        DeviceList = await Store.ListDevicesAsync(tenantId, HttpContext.RequestAborted);
+        return null;
+    }
+}
