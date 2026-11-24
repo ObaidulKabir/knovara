@@ -3,7 +3,6 @@ using System.Windows;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Knovara.Common.Transport;
 
 namespace Knovara.Desktop
 {
@@ -20,7 +19,6 @@ namespace Knovara.Desktop
 
             services.AddSingleton<IConfiguration>(cfg);
             services.AddLogging(builder => builder.AddConsole());
-            services.AddTransport(cfg);
 
             ServiceProvider = services.BuildServiceProvider();
 
