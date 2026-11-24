@@ -76,25 +76,41 @@ namespace Knovara.Desktop
 
             if (dialog.ShowDialog() == true)
             {
+                var attached = new List<string>();
                 foreach (var fileName in dialog.FileNames)
                 {
                     try
                     {
                         var content = File.ReadAllText(fileName);
                         var title = Path.GetFileName(fileName);
+                        if (string.IsNullOrWhiteSpace(content))
+                        {
+                            MessageBox.Show($"'{title}' is empty, so there is nothing to attach.", "Empty File", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            continue;
+                        }
+
                         _contextDocuments.Add(new ContextDocItem
                         {
                             Title = title,
                             Content = content,
                             Source = fileName
                         });
+                        attached.Add(title);
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"Could not read file '{fileName}': {ex.Message}", "File Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                     }
                 }
+
                 UpdateContextSummary();
+                if (attached.Count > 0)
+                {
+                    // The other pin actions confirm; without this it looked like nothing had happened,
+                    // and "Add Typed Note" cannot attach a browsed file because it only reads the text boxes.
+                    MessageBox.Show($"Attached to context: {string.Join(", ", attached)}", "Attached to Context",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
             }
         }
 
@@ -105,7 +121,11 @@ namespace Knovara.Desktop
 
             if (string.IsNullOrEmpty(content))
             {
-                MessageBox.Show("Please enter document content or click 'Browse File...'.", "Content Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(
+                    "Type the note's text in the content box next to this button.\n\n"
+                    + "To attach a file instead, use \"Attach File(s)\" above — that attaches it straight away "
+                    + "and does not fill these boxes.",
+                    "Content Required", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 

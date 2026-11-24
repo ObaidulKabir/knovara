@@ -75,7 +75,8 @@
                                     <TextBlock x:Name="ContextSummaryText" Text=" 0 document(s) attached (~0 tokens)" Foreground="#64748B" FontSize="12" Margin="5,1,0,0"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                    <Button Content="📂 Browse File..." Click="OnBrowseDocumentClicked" Margin="0,0,6,0"
+                                    <Button Content="📂 Attach File(s)..." Click="OnBrowseDocumentClicked" Margin="0,0,6,0"
+                                            ToolTip="Pick one or more text files; they are attached to the context immediately."
                                             Padding="10,4" Background="#E2E8F0" Foreground="#1E293B" BorderBrush="#CBD5E1" Cursor="Hand"/>
                                     <Button Content="✕ Clear All" Click="OnClearContextDocsClicked"
                                             Padding="10,4" Background="#FEE2E2" Foreground="#991B1B" BorderBrush="#FECACA" Cursor="Hand"/>
@@ -89,9 +90,10 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="130"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBox x:Name="NewDocTitleBox" Grid.Column="0" Height="28" Padding="4" Margin="0,0,8,0" ToolTip="Document Title or Heading"/>
-                                <TextBox x:Name="NewDocContentBox" Grid.Column="1" Height="28" Padding="4" Margin="0,0,8,0" ToolTip="Document content or passage"/>
-                                <Button Grid.Column="2" Content="+ Add to Context" Click="OnAddCustomDocClicked" Height="28"
+                                <TextBox x:Name="NewDocTitleBox" Grid.Column="0" Height="28" Padding="4" Margin="0,0,8,0" ToolTip="Title for the note you type below (optional)"/>
+                                <TextBox x:Name="NewDocContentBox" Grid.Column="1" Height="28" Padding="4" Margin="0,0,8,0" ToolTip="Type the note's text here. Files go through &quot;Attach File(s)&quot; above."/>
+                                <Button Grid.Column="2" Content="+ Add Typed Note" Click="OnAddCustomDocClicked" Height="28"
+                                        ToolTip="Adds the text typed in the boxes to the left. Does not attach browsed files."
                                         Background="#3B82F6" Foreground="White" FontWeight="SemiBold" Cursor="Hand"/>
                             </Grid>
 
