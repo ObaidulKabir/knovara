@@ -162,6 +162,7 @@ and ColBERT (2004.12832) — all ingested for tenant `acme`.
 ## Endpoints
 
 Every request carries an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads are filtered by it.
+How far that header is trusted depends on the "Authentication" setting below.
 
 - `POST /api/resources/ingest` — `{ "uri": "samples/payment-service-guide.md", "type": "Document" }`. `type` is `Document` or `Website`; `Code` returns 400 until Phase 4.
 - `GET /api/resources/{resourceId}` — the resource, with its current version and status.
@@ -170,6 +171,36 @@ Every request carries an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads
 - `POST /api/retrieval/search` — `{ "question": "maximum retry interval", "mode": "Semantic", "topK": 10 }`. Runs one retrieval mode with no cache and no context optimization, for the benchmark. `mode` is `Lexical`, `Semantic`, `Hybrid`, `HybridRerank` or `Adaptive` (default); `topK` defaults to 5. The response's `reranked` field says whether that answer went through the cross-encoder.
 - `GET/PUT /api/memory/sessions/{sessionId}` — session knowledge memory.
 - `GET /api/evaluation/recent` — recent per-task metrics, including whether the evidence cache was hit.
+
+## Authentication
+
+Off by default. `TenantAuthMiddleware` then passes the `X-Tenant-Id` header through untouched, which
+is only safe on a developer machine or behind a gateway that sets the header itself — any caller can
+otherwise name any tenant.
+
+Turn it on in configuration (or with `Authentication__Enabled=true` / `Authentication__SigningKey=…`
+in the environment):
+
+```json
+"Authentication": {
+  "Enabled": true,
+  "SigningKey": "<at least 32 bytes, from a secret store — never commit one>",
+  "TenantClaim": "tid"
+}
+```
+
+With it on, every route — including the worker-facing ones — requires a valid bearer token, and the
+tenant comes only from the token's `TenantClaim`, **overwriting** whatever header the caller sent, so
+a spoofed header cannot reach another tenant. A request with no token is `401`; a valid token with no
+tenant claim is `403`. `Issuer` and `Audience` are validated only when set. A key shorter than 32
+bytes fails at startup rather than on the first request, because HS256 would reject it at validation
+time. JWT inbound claim mapping is disabled, so `TenantClaim` matches the token's own name rather than
+being silently rewritten to a legacy URI.
+
+Still missing before this is real authentication: nothing issues tokens yet, and the Docling worker
+has no credential of its own — so enabling it today also locks out the worker, the CLI and the
+benchmark. The middleware is unit-tested, but the end-to-end token path was verified by hand; an
+integration test through the real JWT pipeline needs `Microsoft.AspNetCore.Mvc.Testing`.
 
 ## CLI
 
@@ -251,7 +282,7 @@ docker compose -f infra/docker-compose.yml down -v; docker compose -f infra/dock
 
 ## Next steps
 
-0. **Authentication.** The tenant currently comes from a header the caller sets, which is only safe behind a trusted gateway. The worker-facing endpoints (`version`, `nodes`, `failure`) should also require a worker credential. Add authentication middleware that derives the tenant from the verified credential and sets it where controllers read `TenantHeader`.
+0. **Authentication.** The middleware and token validation exist (see "Authentication" above) but are off by default, because nothing issues tokens yet and the worker has no credential of its own. Finish it: a token endpoint or external issuer, a worker credential for `version`/`nodes`/`failure`, and an integration test through the real JWT pipeline.
 1. **Phase 2 remainder:** section and document summaries (with a self-hosted LLM), and tier S1 of system_architecture.md "Retrieval Strategy by Data Size": the distractor scaling test, and revisiting `AdaptiveMarginThreshold` once the question set covers corpora where most questions are *not* ambiguous (this one escalates 77% of the time, so the latency saving is smaller than hoped).
 2. **Phase 3 — context memory:** replace `InMemoryContextMemoryService` with Redis, and persist evaluation metrics to the `task_metrics` table.
 3. **Phase 4 — code intelligence:** Tree-sitter parsing for `Code` sources.

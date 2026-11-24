@@ -8,12 +8,17 @@ using Knovara.KnowledgeRepresentation;
 using Knovara.Models;
 using Knovara.Retrieval;
 using Npgsql;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using Knovara.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
 var postgres = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required. See README.md \"Run locally\".");
 var modelService = builder.Configuration.GetSection("ModelService").Get<ModelServiceOptions>() ?? new ModelServiceOptions();
+var tenantAuth = builder.Configuration.GetSection("Authentication").Get<TenantAuthOptions>() ?? new TenantAuthOptions();
 
 // Add services to the container.
 
@@ -46,7 +51,49 @@ builder.Services.AddSingleton<IContextOptimizationService, TokenBudgetContextOpt
 builder.Services.AddSingleton<IContextMemoryService, InMemoryContextMemoryService>();
 builder.Services.AddSingleton<IEvaluationService, InMemoryEvaluationService>();
 
+// Authentication is off by default: the tenant then comes from a header, which is only safe locally
+// or behind a trusted gateway. Turning it on makes TenantAuthMiddleware reject untokened requests.
+builder.Services.AddSingleton(tenantAuth);
+if (tenantAuth.Enabled)
+{
+    if (string.IsNullOrWhiteSpace(tenantAuth.SigningKey)
+        || Encoding.UTF8.GetByteCount(tenantAuth.SigningKey) < TenantAuthOptions.MinimumSigningKeyBytes)
+    {
+        // Fail at startup rather than on the first request that tries to validate a token.
+        throw new InvalidOperationException(
+            $"Authentication:SigningKey must be at least {TenantAuthOptions.MinimumSigningKeyBytes} bytes when "
+            + "Authentication:Enabled is true. Supply it from configuration or a secret store, never from source.");
+    }
+
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            // Off, or inbound claims are renamed to legacy URIs ("tid" becomes
+            // .../identity/claims/tenantid) and Authentication:TenantClaim would not match the token.
+            options.MapInboundClaims = false;
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = tenantAuth.Issuer is not null,
+                ValidIssuer = tenantAuth.Issuer,
+                ValidateAudience = tenantAuth.Audience is not null,
+                ValidAudience = tenantAuth.Audience,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(tenantAuth.SigningKey))
+            };
+        });
+}
+
 var app = builder.Build();
+
+if (tenantAuth.Enabled)
+{
+    app.UseAuthentication();
+}
+
+// Must run before the controllers that bind TenantHeader, and covers every route including the
+// worker-facing ones, so no endpoint can be left unprotected by a forgotten attribute.
+app.UseMiddleware<TenantAuthMiddleware>();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
