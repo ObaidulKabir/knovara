@@ -60,7 +60,7 @@ MAX_TITLE_CHARS = 1000
 
 # Part of every version hash: the stored hierarchy depends on the extraction logic as well as the
 # source bytes, so bumping this re-processes every source once on its next ingest.
-EXTRACTOR_VERSION = "docling-hierarchy-3"
+EXTRACTOR_VERSION = "docling-hierarchy-5"
 NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+\S")
 
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".html", ".htm", ".md", ".markdown"}
@@ -289,7 +289,7 @@ def to_nodes(document, source_name: str) -> list[dict]:
             continue
 
         if isinstance(item, TableItem):
-            level, content, pieces = "table", item.export_to_markdown(doc=document), split_table
+            level, content, pieces = "table", compact_table(item.export_to_markdown(doc=document)), split_table
         elif isinstance(item, PictureItem):
             level, content, pieces = "figure", item.caption_text(doc=document), split_text
         else:
@@ -426,16 +426,33 @@ def split_text(text: str, limit: int) -> list[str]:
     return pack(re.split(r"(?<=[.!?])\s+", text), " ", limit, split_sentence)
 
 
+def divider_index(lines: list[str]) -> int | None:
+    """Index of the |---|---| line under the column headers; Docling puts the caption above the table."""
+    return next((i for i, line in enumerate(lines) if i > 0 and re.fullmatch(r"[\s|:-]*-{3,}[\s|:-]*", line)), None)
+
+
+def compact_table(markdown: str) -> str:
+    """Shrinks the divider row, which Docling pads to the column widths: on wide tables it alone exceeded the token cap."""
+    lines = markdown.splitlines()
+    index = divider_index(lines)
+    if index is not None:
+        lines[index] = "|" + "---|" * (lines[index].strip().strip("|").count("|") + 1)
+    return "\n".join(lines)
+
+
 def split_table(markdown: str, limit: int) -> list[str]:
-    """Splits a Markdown table between rows, repeating the header row and separator in every piece."""
+    """Splits a Markdown table between rows, repeating the caption, header row and divider in every piece."""
     if count_tokens(markdown) <= limit:
         return [markdown]
     lines = markdown.splitlines()
-    header = "\n".join(lines[:2])
+    index = divider_index(lines)
+    if index is None:
+        return split_text(markdown, limit)
+    header = "\n".join(lines[:index + 1])
     budget = limit - count_tokens(header)
     if budget < limit // 2:  # a header this wide would leave too little room for rows
         return split_text(markdown, limit)
-    pieces = pack(lines[2:], "\n", budget, lambda row: split_text(row, budget))
+    pieces = pack(lines[index + 1:], "\n", budget, lambda row: split_text(row, budget))
     return [f"{header}\n{piece}" for piece in pieces]
 
 

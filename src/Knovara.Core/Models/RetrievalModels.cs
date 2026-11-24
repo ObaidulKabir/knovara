@@ -9,7 +9,7 @@ public enum IndexKind
     Structural
 }
 
-/// <summary>How retrieval finds candidates. The benchmark compares all four; /ask uses <see cref="HybridRerank"/>.</summary>
+/// <summary>How retrieval finds candidates. The benchmark compares all of them; /ask uses <see cref="Adaptive"/>.</summary>
 public enum RetrievalMode
 {
     /// <summary>Postgres full-text search only (Phase 1 behaviour).</summary>
@@ -18,8 +18,10 @@ public enum RetrievalMode
     Semantic,
     /// <summary>Lexical and semantic results merged with Reciprocal Rank Fusion.</summary>
     Hybrid,
-    /// <summary>Hybrid, then the top candidates reordered by a cross-encoder.</summary>
-    HybridRerank
+    /// <summary>Semantic and lexical candidates pooled, then reordered by a cross-encoder.</summary>
+    HybridRerank,
+    /// <summary>Semantic search, escalating to <see cref="HybridRerank"/> only when its result looks uncertain.</summary>
+    Adaptive
 }
 
 /// <summary>
@@ -42,14 +44,15 @@ public record RetrievalQuery(
     string SessionId,
     string Question,
     int? MaxTokenBudget = null,
-    RetrievalMode Mode = RetrievalMode.HybridRerank,
+    RetrievalMode Mode = RetrievalMode.Adaptive,
     int TopK = 5);
 
 public record RetrievalResult(
     string QueryId,
     IReadOnlyList<EvidenceItem> Evidence,
     bool EvidenceSufficient,
-    string? FollowUpSearchHint);
+    string? FollowUpSearchHint,
+    bool Reranked = false);
 
 /// <summary>The minimum sufficient, deduplicated evidence package handed to the LLM.</summary>
 public record ContextPackage(

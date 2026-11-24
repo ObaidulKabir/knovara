@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Knovara.Api.Controllers;
 
 public record AskRequest(string SessionId, string Question, int TokenBudget = 2000);
-public record SearchRequest(string Question, RetrievalMode Mode = RetrievalMode.HybridRerank, int TopK = 5);
+public record SearchRequest(string Question, RetrievalMode Mode = RetrievalMode.Adaptive, int TopK = 5);
 
 [ApiController]
 [Route("api/retrieval")]

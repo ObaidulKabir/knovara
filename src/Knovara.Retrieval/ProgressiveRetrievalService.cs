@@ -4,12 +4,13 @@ using Knovara.Core.Models;
 namespace Knovara.Retrieval;
 
 /// <summary>
-/// Retrieval across the four modes the benchmark compares (see eval/run_benchmark.py).
-/// RetrievalMode.HybridRerank is what /ask uses; the others exist to measure what each stage adds.
-/// Query understanding, coarse-to-fine escalation and context expansion are future phases — this
+/// Retrieval across the modes the benchmark compares (see eval/run_benchmark.py).
+/// RetrievalMode.Adaptive is what /ask uses; the others exist to measure what each stage adds.
+/// Query understanding, coarse-to-fine retrieval and context expansion are future phases — this
 /// runs one search pass per question, widened for the hybrid and rerank modes.
 /// </summary>
-public sealed class ProgressiveRetrievalService(IIndexManagementService index, IModelService models) : IIntelligentRetrievalService
+public sealed class ProgressiveRetrievalService(IIndexManagementService index, IModelService models, RetrievalOptions options)
+    : IIntelligentRetrievalService
 {
     private const int CandidatePoolSize = 30;
     private const int RerankSemanticCandidates = 20;
@@ -17,16 +18,18 @@ public sealed class ProgressiveRetrievalService(IIndexManagementService index, I
 
     public async Task<RetrievalResult> RetrieveAsync(RetrievalQuery query, CancellationToken ct = default)
     {
-        var evidence = query.Mode switch
+        (IReadOnlyList<EvidenceItem> Evidence, bool Reranked) result = query.Mode switch
         {
-            RetrievalMode.Lexical => await index.SearchLexicalAsync(query.Question, query.TenantId, query.TopK, ct),
-            RetrievalMode.Semantic => await SemanticAsync(query, query.TopK, ct),
-            RetrievalMode.Hybrid => (await FuseAsync(query, CandidatePoolSize, ct)).Take(query.TopK).ToList(),
-            RetrievalMode.HybridRerank => await RerankAsync(query, ct),
+            RetrievalMode.Lexical => (await index.SearchLexicalAsync(query.Question, query.TenantId, query.TopK, ct), false),
+            RetrievalMode.Semantic => (await SemanticAsync(query, query.TopK, ct), false),
+            RetrievalMode.Hybrid => ((await FuseAsync(query, CandidatePoolSize, ct)).Take(query.TopK).ToList(), false),
+            RetrievalMode.HybridRerank => (await HybridRerankAsync(query, ct), true),
+            RetrievalMode.Adaptive => await AdaptiveAsync(query, ct),
             _ => throw new ArgumentOutOfRangeException(nameof(query), query.Mode, null)
         };
 
-        return new RetrievalResult(query.QueryId, evidence, EvidenceSufficient: evidence.Count > 0, FollowUpSearchHint: null);
+        return new RetrievalResult(query.QueryId, result.Evidence, EvidenceSufficient: result.Evidence.Count > 0,
+            FollowUpSearchHint: null, Reranked: result.Reranked);
     }
 
     public Task<RetrievalResult> ExpandAsync(RetrievalQuery query, RetrievalResult priorResult, CancellationToken ct = default)
@@ -69,19 +72,36 @@ public sealed class ProgressiveRetrievalService(IIndexManagementService index, I
             .ToList();
     }
 
-    /// <summary>Pooled without RRF: the cross-encoder judges each candidate, and RRF ranked below semantic alone on the benchmark.</summary>
-    private async Task<IReadOnlyList<EvidenceItem>> RerankAsync(RetrievalQuery query, CancellationToken ct)
+    private async Task<IReadOnlyList<EvidenceItem>> HybridRerankAsync(RetrievalQuery query, CancellationToken ct)
     {
         var semanticTask = SemanticAsync(query, RerankSemanticCandidates, ct);
         var lexicalTask = index.SearchLexicalAsync(query.Question, query.TenantId, RerankLexicalCandidates, ct);
         await Task.WhenAll(semanticTask, lexicalTask);
+        return await RerankAsync(query, await semanticTask, await lexicalTask, ct);
+    }
 
-        var lexicalIds = (await lexicalTask).Select(item => item.NodeId).ToHashSet();
-        var semantic = (await semanticTask)
+    /// <summary>Semantic search first; the lexical search and cross-encoder run only when its top two scores are too close to call.</summary>
+    private async Task<(IReadOnlyList<EvidenceItem>, bool)> AdaptiveAsync(RetrievalQuery query, CancellationToken ct)
+    {
+        var semantic = await SemanticAsync(query, RerankSemanticCandidates, ct);
+        var confident = semantic.Count == 1
+            || (semantic.Count > 1 && semantic[0].RelevanceScore - semantic[1].RelevanceScore >= options.AdaptiveMarginThreshold);
+        if (confident) return (semantic.Take(query.TopK).ToList(), false);
+
+        var lexical = await index.SearchLexicalAsync(query.Question, query.TenantId, RerankLexicalCandidates, ct);
+        return (await RerankAsync(query, semantic, lexical, ct), true);
+    }
+
+    /// <summary>Pooled without RRF: the cross-encoder judges each candidate, and RRF ranked below semantic alone on the benchmark.</summary>
+    private async Task<IReadOnlyList<EvidenceItem>> RerankAsync(
+        RetrievalQuery query, IReadOnlyList<EvidenceItem> semanticResults, IReadOnlyList<EvidenceItem> lexicalResults, CancellationToken ct)
+    {
+        var lexicalIds = lexicalResults.Select(item => item.NodeId).ToHashSet();
+        var semantic = semanticResults
             .Select(item => lexicalIds.Contains(item.NodeId) ? item with { RetrievedVia = IndexKind.Hybrid } : item)
             .ToList();
         var semanticIds = semantic.Select(item => item.NodeId).ToHashSet();
-        var candidates = semantic.Concat((await lexicalTask).Where(item => !semanticIds.Contains(item.NodeId))).ToList();
+        var candidates = semantic.Concat(lexicalResults.Where(item => !semanticIds.Contains(item.NodeId))).ToList();
         if (candidates.Count == 0) return candidates;
 
         var scores = await models.RerankAsync(query.Question, candidates.Select(c => c.Content).ToList(), ct);

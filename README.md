@@ -98,8 +98,8 @@ path plus its text, and keeps the vector in `knowledge_nodes.embedding` along wi
 name. A resource whose stored embeddings come from a different model counts as changed on its
 next ingest, so switching models re-embeds it.
 
-There are four retrieval modes. `/ask` uses `HybridRerank`; `POST /api/retrieval/search` runs
-any one of them so they can be compared.
+There are five retrieval modes. `/ask` uses `Adaptive`; `POST /api/retrieval/search` runs any
+one of them so they can be compared.
 
 | Mode | What it does |
 |---|---|
@@ -107,12 +107,29 @@ any one of them so they can be compared.
 | `Semantic` | Embedding similarity through pgvector (HNSW, cosine distance), filtered by tenant and embedding model. |
 | `Hybrid` | The top 30 lexical and top 30 semantic results merged with Reciprocal Rank Fusion. |
 | `HybridRerank` | The top 20 semantic and top 10 lexical results (up to 30 after removing duplicates) reordered by a cross-encoder, which reads question and passage together. |
+| `Adaptive` | Runs `Semantic` first. Only when its top two results score within `AdaptiveMarginThreshold` (default 0.038) does it add the lexical candidates and rerank, reusing the semantic results it already has. |
 
-On the sample corpus, `Semantic` and `HybridRerank` both put a correct passage in the top 3 for
-90% of the benchmark questions, against 68% for `Lexical`, which mostly misses questions worded
-differently from the document. `Semantic` answers in about 30 ms; `HybridRerank` takes about
-1.7 s on CPU for a slightly better first result. See [eval/results](eval/results) and
-system_architecture.md "Retrieval Strategy by Data Size" for how this should change as data grows.
+On a 215-question benchmark over 7 documents (3 samples plus 4 arXiv papers, 290 passages),
+`HybridRerank` reaches R@3 0.80 and MRR 0.76, against R@3 0.67 for `Semantic` alone and R@3 0.54
+for `Lexical`, which mostly misses questions worded differently from the document. `Semantic`
+answers in about 34 ms; `HybridRerank` takes about 1.8 s on CPU for a markedly better result.
+`Adaptive` matches `HybridRerank`'s accuracy within noise (R@3 0.79, MRR 0.75) while reranking
+only 77% of questions — on this corpus, most questions turn out to need it, so `Adaptive` saves
+latency on roughly one question in four rather than most of them. The margin threshold was fit
+on this question set (see "Choosing the margin threshold" below); a corpus with more
+unambiguous, well-separated questions would escalate less often. See [eval/results](eval/results)
+and system_architecture.md "Retrieval Strategy by Data Size" for how this should change as data
+grows.
+
+### Choosing the margin threshold
+
+`eval/questions.json`'s 215 questions were split into two halves (alternating, so every document
+appears in both). For each half, the threshold was swept over candidate values and the smallest
+one was kept whose R@3 and MRR stayed within 0.01 of always reranking, measured on *that* half;
+it was then scored on the *other* half. Both halves picked thresholds within 0.004 of each other
+(0.038 and 0.034), so 0.038 — the value fit on the full set — was kept as the shipped default.
+Lower thresholds escalate less often but cost more accuracy; see the margin-rule row in
+`eval/results` for the full sweep.
 
 ### Model service
 
@@ -132,13 +149,14 @@ memory; a full benchmark run now peaks around 600 MB of its `MODEL_SERVICE_MEM_L
 python eval/run_benchmark.py
 ```
 
-It asks the 40 questions in `eval/questions.json` in every mode, against the API on
+It asks the 215 questions in `eval/questions.json` in every mode, against the API on
 `127.0.0.1:5299` for tenant `acme`, and writes a Markdown and JSON report to `eval/results/`:
 Recall@1/3/5/10, MRR, Recall@3 for questions that use the document's wording and for paraphrased
-ones, the size of the top 3 passages, and p50/p95 latency. A passage counts as correct if it
-contains one of the question's expected fragments. The questions cover the three files in
-`sources/samples` and the Docling technical report (https://arxiv.org/pdf/2408.09869), all
-ingested for tenant `acme`.
+ones, the size of the top 3 passages, the share of answers the API reranked, and p50/p95 latency.
+A passage counts as correct if it contains one of the question's expected fragments. The
+questions cover the three files in `sources/samples` and four arXiv papers — the Docling
+technical report (2408.09869), Sentence-BERT (1908.10084), Dense Passage Retrieval (2004.04906)
+and ColBERT (2004.12832) — all ingested for tenant `acme`.
 
 ## Endpoints
 
@@ -147,8 +165,8 @@ Every request carries an `X-Tenant-Id` header (see `TenantHeader.cs`); all reads
 - `POST /api/resources/ingest` — `{ "uri": "samples/payment-service-guide.md", "type": "Document" }`. `type` is `Document` or `Website`; `Code` returns 400 until Phase 4.
 - `GET /api/resources/{resourceId}` — the resource, with its current version and status.
 - `POST /api/resources/{resourceId}/version`, `/nodes`, `/failure` — called by the worker.
-- `POST /api/retrieval/ask` — `{ "sessionId": "s1", "question": "maximum retry interval" }`. Evidence cache → on a miss, `HybridRerank` retrieval → each passage re-read from Postgres and dropped if its source has changed → context optimization. Returns a `ContextPackage`.
-- `POST /api/retrieval/search` — `{ "question": "maximum retry interval", "mode": "Semantic", "topK": 10 }`. Runs one retrieval mode with no cache and no context optimization, for the benchmark. `mode` is `Lexical`, `Semantic`, `Hybrid` or `HybridRerank` (default); `topK` defaults to 5.
+- `POST /api/retrieval/ask` — `{ "sessionId": "s1", "question": "maximum retry interval" }`. Evidence cache → on a miss, `Adaptive` retrieval → each passage re-read from Postgres and dropped if its source has changed → context optimization. Returns a `ContextPackage`.
+- `POST /api/retrieval/search` — `{ "question": "maximum retry interval", "mode": "Semantic", "topK": 10 }`. Runs one retrieval mode with no cache and no context optimization, for the benchmark. `mode` is `Lexical`, `Semantic`, `Hybrid`, `HybridRerank` or `Adaptive` (default); `topK` defaults to 5. The response's `reranked` field says whether that answer went through the cross-encoder.
 - `GET/PUT /api/memory/sessions/{sessionId}` — session knowledge memory.
 - `GET /api/evaluation/recent` — recent per-task metrics, including whether the evidence cache was hit.
 
@@ -213,7 +231,7 @@ docker compose -f infra/docker-compose.yml down -v; docker compose -f infra/dock
 ## Next steps
 
 0. **Authentication.** The tenant currently comes from a header the caller sets, which is only safe behind a trusted gateway. The worker-facing endpoints (`version`, `nodes`, `failure`) should also require a worker credential. Add authentication middleware that derives the tenant from the verified credential and sets it where controllers read `TenantHeader`.
-1. **Phase 2 remainder:** section and document summaries (with a self-hosted LLM), and tier S1 of system_architecture.md "Retrieval Strategy by Data Size": rerank only when semantic results look uncertain, a 200+ question benchmark and the distractor scaling test.
+1. **Phase 2 remainder:** section and document summaries (with a self-hosted LLM), and tier S1 of system_architecture.md "Retrieval Strategy by Data Size": the distractor scaling test, and revisiting `AdaptiveMarginThreshold` once the question set covers corpora where most questions are *not* ambiguous (this one escalates 77% of the time, so the latency saving is smaller than hoped).
 2. **Phase 3 — context memory:** replace `InMemoryContextMemoryService` with Redis, and persist evaluation metrics to the `task_metrics` table.
 3. **Phase 4 — code intelligence:** Tree-sitter parsing for `Code` sources.
 4. Harden the worker's URL fetching against DNS rebinding (resolve once and connect to the checked address).

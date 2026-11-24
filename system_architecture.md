@@ -192,6 +192,7 @@ Phase 2 benchmark (`eval/run_benchmark.py`): 86 passages, 40 questions, bge-smal
 | Hybrid (RRF, ~60 candidates, one batch) + rerank | 0.90 | 0.84 | 6,046 ms |
 | Semantic top 20 + rerank (batches of 8, sorted by length) | 0.93 | 0.85 | ~1,000 ms rerank step (offline measurement) |
 | Semantic top 20 + lexical top 10 + rerank (live, after structure-aware chunking: 58 passages) | 0.90 | 0.85 | 1,694 ms |
+| Adaptive (margin < 0.038; 215 questions, 7 docs, 290 passages): reranks 77% of questions | 0.79 | 0.75 | 1,943 ms |
 
 - RRF blends rankings without reading the passages; at this size it ranked worse than semantic search alone. When a rerank follows, merge the candidate pools and let the reranker order them; use RRF only on paths without a rerank.
 - Reranking ~60 candidates in one batch exhausted the model service's 2.2 GB memory limit. Batches of 8 sorted by length kept peak memory near 450 MB; more ONNX threads (2 → 8) did not reduce latency.
@@ -221,7 +222,7 @@ The tier boundaries above are rules of thumb. A **distractor scaling test** repl
 
 ### Rollout
 
-1. **Now (S0–S1):** merged semantic + keyword candidates with batched, length-sorted reranking (done); per-query escalation; tier configuration; question set expanded to 200+.
+1. **Now (S0–S1):** merged semantic + keyword candidates with batched, length-sorted reranking (done); per-query escalation (done); tier configuration; question set expanded to 200+ (done).
 2. **Scaling test** up to 1M passages; set the thresholds from its results.
 3. **S2 features** once any tenant passes ~100k passages: coarse retrieval over document/section summaries (requires summaries at ingestion), true BM25, `halfvec`, query cache.
 4. **S3 infrastructure** only when a tenant approaches ~10M passages: dedicated engines, quantization, sharding.

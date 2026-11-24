@@ -7,6 +7,7 @@ retrieval mode and reports, per mode and per question kind:
   latency   client-side p50 / p95 per search
   top-3 chars  mean size of the top 3 passages: what a correct hit costs in context, since
                larger passages make the "contains a fragment" check easier to pass
+  reranked  share of answers the API reports as reranked (Adaptive reranks only uncertain ones)
 
 A passage counts as correct when it contains any of the question's "expect"
 fragments (case-insensitive). Standard library only.
@@ -26,11 +27,11 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-MODES = ["Lexical", "Semantic", "Hybrid", "HybridRerank"]  # must match Knovara.Core.Models.RetrievalMode exactly
+MODES = ["Lexical", "Semantic", "Hybrid", "HybridRerank", "Adaptive"]  # must match Knovara.Core.Models.RetrievalMode exactly
 CUTOFFS = [1, 3, 5, 10]
 
 
-def search(base_url: str, tenant: str, question: str, mode: str, top_k: int) -> tuple[list[dict], float]:
+def search(base_url: str, tenant: str, question: str, mode: str, top_k: int) -> tuple[list[dict], float, bool]:
     body = json.dumps({"question": question, "mode": mode, "topK": top_k}).encode()
     request = urllib.request.Request(
         f"{base_url}/api/retrieval/search",
@@ -41,7 +42,7 @@ def search(base_url: str, tenant: str, question: str, mode: str, top_k: int) -> 
     started = time.perf_counter()
     with urllib.request.urlopen(request, timeout=120) as response:
         payload = json.load(response)
-    return payload["evidence"], (time.perf_counter() - started) * 1000
+    return payload["evidence"], (time.perf_counter() - started) * 1000, bool(payload.get("reranked"))
 
 
 def first_hit(evidence: list[dict], expect: list[str]) -> int | None:
@@ -83,14 +84,14 @@ def main() -> int:
     for mode in modes:
         ranks, latencies, top3_chars, per_kind = [], [], [], {kind: [] for kind in kinds}
         misses[mode] = []
-        errors = 0
+        errors = reranked = 0
         try:
             search(args.base_url, args.tenant, "warm up", mode, 10)  # first call pays connection/model warm-up
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
             print(f"{mode} warm-up failed ({exc}); continuing", file=sys.stderr)
         for q in questions:
             try:
-                evidence, latency = search(args.base_url, args.tenant, q["question"], mode, 10)
+                evidence, latency, was_reranked = search(args.base_url, args.tenant, q["question"], mode, 10)
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
                 # A single slow/failed call (CPU inference time varies a lot with real passage length)
                 # counts as a miss rather than aborting every other question's result in this mode.
@@ -101,6 +102,7 @@ def main() -> int:
             else:
                 rank = first_hit(evidence, q["expect"])
                 top3_chars.append(sum(len(item["content"]) for item in evidence[:3]))
+                reranked += was_reranked
             if latency is not None:
                 latencies.append(latency)
             ranks.append(rank)
@@ -114,6 +116,7 @@ def main() -> int:
             **{kind: summarize(per_kind[kind]) for kind in kinds},
             "errors": errors,
             "top3Chars": round(statistics.mean(top3_chars)) if top3_chars else None,
+            "rerankedShare": round(reranked / len(questions), 2),
             "latencyMs": {
                 "p50": round(statistics.median(latencies), 1) if latencies else None,
                 "p95": round(sorted(latencies)[max(0, int(len(latencies) * 0.95) - 1)], 1) if latencies else None,
@@ -125,15 +128,15 @@ def main() -> int:
         "",
         f"{len(questions)} questions ({', '.join(f'{sum(q['kind'] == k for q in questions)} {k}' for k in kinds)}), tenant `{args.tenant}`.",
         "",
-        "| Mode | R@1 | R@3 | R@5 | R@10 | MRR | " + " | ".join(f"{k} R@3" for k in kinds) + " | top-3 chars | p50 ms | p95 ms | errors |",
-        "|---|---|---|---|---|---|" + "---|" * len(kinds) + "---|---|---|---|",
+        "| Mode | R@1 | R@3 | R@5 | R@10 | MRR | " + " | ".join(f"{k} R@3" for k in kinds) + " | top-3 chars | reranked | p50 ms | p95 ms | errors |",
+        "|---|---|---|---|---|---|" + "---|" * len(kinds) + "---|---|---|---|---|",
     ]
     for mode, result in report["modes"].items():
         overall = result["all"]
         lines.append(
             f"| {mode} | " + " | ".join(f"{overall[f'R@{k}']:.2f}" for k in CUTOFFS)
             + f" | {overall['MRR']:.2f} | " + " | ".join(f"{result[k]['R@3']:.2f}" for k in kinds)
-            + f" | {result['top3Chars']} | {result['latencyMs']['p50']} | {result['latencyMs']['p95']} | {result['errors']} |"
+            + f" | {result['top3Chars']} | {result['rerankedShare']:.0%} | {result['latencyMs']['p50']} | {result['latencyMs']['p95']} | {result['errors']} |"
         )
     lines += ["", "## Questions not answered in the top 3", ""]
     for mode, items in misses.items():

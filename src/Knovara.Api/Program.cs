@@ -40,6 +40,7 @@ builder.Services.AddHttpClient<IModelService, HttpModelService>(client =>
     client.BaseAddress = new Uri(modelService.BaseUrl.TrimEnd('/') + "/");
     client.Timeout = TimeSpan.FromSeconds(modelService.TimeoutSeconds);
 });
+builder.Services.AddSingleton(builder.Configuration.GetSection("Retrieval").Get<RetrievalOptions>() ?? new RetrievalOptions());
 builder.Services.AddSingleton<IIntelligentRetrievalService, ProgressiveRetrievalService>();
 builder.Services.AddSingleton<IContextOptimizationService, TokenBudgetContextOptimizationService>();
 builder.Services.AddSingleton<IContextMemoryService, InMemoryContextMemoryService>();
