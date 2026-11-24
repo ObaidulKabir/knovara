@@ -159,6 +159,72 @@ Step 6 is what makes the design principle enforceable: summaries help find evide
 
 Retrieval depth and token budget scale with task type: a factual lookup may need one passage; a code-impact analysis may need multi-file dependency traversal; a whole-book analysis may need chapter-level evidence.
 
+## Retrieval Strategy by Data Size
+
+Which retrieval pipeline runs depends on how many passages a search has to look through. Because every search is tenant-filtered, that is a **per-tenant** count: retrieval quality depends on it, while infrastructure cost depends on the total across all tenants. Build tier S1 well first, keep the tier boundaries configurable, and move a tenant up a tier only when its data and the scaling benchmark justify it.
+
+Why size changes the answer:
+
+- **Single-vector embeddings lose precision as the index grows.** Each passage is compressed into one fixed-size vector, so the more passages there are, the more unrelated ones land close to a query by chance; low-dimensional vectors degrade fastest (Reimers & Gurevych, 2021, *The Curse of Dense Low-Dimensional Information Retrieval for Large Index Sizes*; Weller et al., 2025, *On the Theoretical Limitations of Embedding-Based Retrieval*). They remain the best tool for paraphrase and meaning matches.
+- **Keyword search (BM25) keeps its precision** on exact names, identifiers, codes and numbers at any scale, but never fixes vocabulary mismatch.
+- **A cross-encoder reranker** reads question and passage together, so it has no compression bottleneck. Its cost depends on the number of candidates, not the corpus size, which makes it more valuable as the first stage gets noisier — but it can only reorder what the first stage found.
+
+### Tiers
+
+| Tier | Passages per search | Roughly | Candidate generation | Rerank | Infrastructure |
+|---|---|---|---|---|---|
+| **S0 Tiny** | under 1,000 | up to ~20–50 documents | Exact (brute-force) semantic search; keyword search as backup | Only when unsure, top 10 | Postgres + pgvector, no tuning |
+| **S1 Small** | 1k–100k | up to a few thousand documents | Semantic top 20 + keyword top 10, merged | Always, ~30 candidates in batches of 8 | Postgres + pgvector HNSW + full-text search; model service on CPU |
+| **S2 Medium** | 100k–10M | up to a few hundred thousand documents | Coarse retrieval first (document/section summaries), then hybrid within the matches; true BM25 | Always, 30–50 candidates | pgvector `halfvec`, partitioned per tenant; BM25 extension; Redis query cache; more ingestion workers |
+| **S3 Large** | over 10M | millions of documents | Routing + compressed (quantized) vector search with full-precision re-scoring + BM25 or learned sparse (SPLADE) | Always, 30–50; self-owned GPU if traffic is high | Dedicated open-source engines (Qdrant or Milvus, OpenSearch), sharding |
+
+Vector memory at 384 dimensions is about 1.5 KB per passage: ~150 MB at 100k passages, ~15 GB at 10M (~7.5 GB with `halfvec`), ~150 GB at 100M (~5 GB with binary quantization plus re-scoring). Index structures add to these figures. A tenant whose entire content fits in the agent's token budget can skip retrieval and receive all of it, if the longer generation time is acceptable.
+
+### Measured on the current setup
+
+Phase 2 benchmark (`eval/run_benchmark.py`): 86 passages, 40 questions, bge-small-en-v1.5 embeddings, ms-marco-MiniLM-L-6-v2 reranker, CPU only.
+
+| Pipeline | R@3 | MRR | p50 latency |
+|---|---|---|---|
+| Lexical only | 0.68 | 0.53 | 7 ms |
+| Semantic only | 0.90 | 0.82 | 21 ms |
+| Hybrid (RRF) | 0.80 | 0.74 | 24 ms |
+| Hybrid (RRF, ~60 candidates, one batch) + rerank | 0.90 | 0.84 | 6,046 ms |
+| Semantic top 20 + rerank (batches of 8, sorted by length) | 0.93 | 0.85 | ~1,000 ms rerank step (offline measurement) |
+
+- RRF blends rankings without reading the passages; at this size it ranked worse than semantic search alone. When a rerank follows, merge the candidate pools and let the reranker order them; use RRF only on paths without a rerank.
+- Reranking ~60 candidates in one batch exhausted the model service's 2.2 GB memory limit. Batches of 8 sorted by length kept peak memory near 450 MB; more ONNX threads (2 → 8) did not reduce latency.
+- With 40 questions, a 0.03 difference is one question — within noise. Tier boundaries must come from the scaling test below, not from these numbers.
+
+### Choosing beyond size
+
+1. **Latency budget.** Interactive chat (retrieval under ~300 ms): semantic search, reranking only when unsure (top 10 measured ~0.3 s). Agents and reports (1–2 s acceptable): always rerank.
+2. **Content type.** Identifier-heavy content (invoices, logs, product codes, legal citations) needs a larger keyword share of the candidate pool; conversational text can lean on semantic search.
+3. **Traffic.** Reranking 20 candidates takes ~0.8 s on the current hardware, so sustained traffic of N queries per second needs roughly N rerank workers (estimate).
+4. **Ingestion volume.** Embedding cost grows with total data; large imports need more worker replicas or a self-owned GPU.
+
+### Automatic selection
+
+- **Tier per tenant:** the passage count is recorded when ingestion commits a version and mapped to S0–S3 by thresholds held in configuration, so boundaries can be tuned without code changes.
+- **Escalation per query** (Steps 2–5 of Progressive Retrieval above): run the tier's cheapest step first and escalate only when the result looks uncertain — a low top score, or the top two results scoring too close — from semantic search, to adding keyword candidates, to reranking. The benchmark calibrates these thresholds.
+- **Observability:** the Evaluation & Observability Service records which path each query took and its latency, so thresholds can be tuned from real traffic.
+
+### Calibrating the boundaries
+
+The tier boundaries above are rules of thumb. A **distractor scaling test** replaces them with measured values:
+
+1. Keep a question set with known answers, expanded to 200+ questions.
+2. Add growing amounts of unrelated passages from free public datasets (e.g. Wikipedia, BEIR corpora): 1k, 10k, 100k, then 1M.
+3. At each size, measure R@3, MRR, latency and memory for every retrieval mode.
+4. Where semantic-only starts losing to hybrid + rerank is the S0/S1 boundary; where pgvector latency or memory stops being acceptable is the S2/S3 boundary.
+
+### Rollout
+
+1. **Now (S0–S1):** merged semantic + keyword candidates with batched, length-sorted reranking; per-query escalation; tier configuration; question set expanded to 200+.
+2. **Scaling test** up to 1M passages; set the thresholds from its results.
+3. **S2 features** once any tenant passes ~100k passages: coarse retrieval over document/section summaries (requires summaries at ingestion), true BM25, `halfvec`, query cache.
+4. **S3 infrastructure** only when a tenant approaches ~10M passages: dedicated engines, quantization, sharding.
+
 ## Incremental Indexing & Invalidation
 
 - Detect changed resources via content hashes, timestamps, or repository/webhook events.
