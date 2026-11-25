@@ -384,6 +384,10 @@ This control plane was built before the local runtime, as a multi-tenant service
 for them), with enrollment optional: Knovara itself is meant to run fully locally without any account. Treat the multi-tenant
 operator model described here as the current behaviour, not the destination.
 
+Licensing direction (decided, see `business_architecture.md`): this authority-domain code is part of the open core and is intended to be released under Apache-2.0.
+SSO/SCIM, audit retention, the policy engine, federation management and the multi-customer operator layer will be separate, proprietary modules that attach to it;
+none of them is in this repository.
+
 ### Known limits
 
 - **Turning on API authentication currently breaks ingestion.** The document worker calls the API without a

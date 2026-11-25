@@ -301,10 +301,13 @@ service, ahead of the local runtime that the target architecture ranks first (Ph
 - The existing control plane (`Knovara.ControlPlane`) stays, and is reshaped in a later step; until then its "platform" role is the operator of one deployment.
 - With API authentication enabled the document worker, MCP server and CLI currently lack a credential; service credentials are the step after the runtime spike.
 
-**Business model (decided 2026-11-25; see `business_architecture.md`).** Open core: the local runtime, CLI and MCP server are free and open source under Apache-2.0; team and enterprise capabilities and support are paid; first customers are engineering teams. No LICENSE file is added until the open/proprietary boundary of the control plane is decided.
+**Business model and boundary (decided 2026-11-25; see `business_architecture.md`).** Open core, first customers are engineering teams. The engine, clients, local runtime,
+token-verification code and **one customer's authority domain** (today's `Knovara.ControlPlane`: accounts, roles, enrollment, device tokens, installer hosting) are open under
+Apache-2.0. SSO/SCIM, audit retention, the policy engine, the federation manager, the multi-customer operator and billing layer, hosting and support are paid and proprietary,
+developed in a separate private repository that attaches through control-plane extension points (audit sink, identity provider, policy evaluator, operator interface).
+Contributions to the open repository use DCO sign-off. Because everything in the repository today is open, no split is needed now.
 
-**Not decided yet.** That boundary and the resulting repository split, whether the ONNX models are bundled or downloaded on first run, and the timing of KRES / federation (Phase 3).
-models are bundled or downloaded on first run, and the timing of KRES / federation (Phase 3).
+**Not decided yet.** Whether the ONNX models are bundled or downloaded on first run, the exact shape of the control-plane extension points, and the timing of KRES / federation (Phase 3).
 
 ## Incremental Indexing & Invalidation
 

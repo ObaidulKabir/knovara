@@ -287,7 +287,7 @@ svg .gap{fill:var(--accent);}
   <!-- B: team server -->
   <rect x="395" y="170" width="340" height="300" rx="8" fill="var(--ok-soft)" stroke="var(--ok)" stroke-width="1.75"/>
   <text x="411" y="198" class="title" font-size="16">B · Team server</text>
-  <text x="411" y="217" class="small">customer-run · Team / Enterprise tier</text>
+  <text x="411" y="217" class="small">customer-run · free to self-host</text>
   <rect x="601" y="184" width="118" height="22" rx="11" fill="var(--surface)" stroke="var(--ok)"/>
   <text x="660" y="199" text-anchor="middle" font-size="11.5" fill="var(--ok)" class="title">BUILT today</text>
   <line x1="395" y1="230" x2="735" y2="230" stroke="var(--ok)" opacity=".4"/>
@@ -297,7 +297,7 @@ svg .gap{fill:var(--accent);}
   <text x="411" y="322" font-size="12.5">Control plane = the customer's authority</text>
   <text x="411" y="340" font-size="12.5">   domain: roles, enrollment, audit</text>
   <text x="411" y="366" font-size="12.5">Desktops and agents attach with tokens</text>
-  <text x="411" y="414" class="title" font-size="12.5">Shared collections for a team</text>
+  <text x="411" y="414" class="title" font-size="12.5">Shared collections; Enterprise modules add governance</text>
   <text x="411" y="440" class="small">needs service credentials for the worker,</text>
   <text x="411" y="456" class="small">MCP and CLI before authentication is enforced</text>
 
@@ -314,7 +314,7 @@ svg .gap{fill:var(--accent);}
   <text x="776" y="322" font-size="12.5">Billed per seat plus usage</text>
   <text x="776" y="366" font-size="12.5">The customer still owns data and policy;</text>
   <text x="776" y="384" font-size="12.5">   hosting is a way of running their domain</text>
-  <text x="776" y="414" class="title" font-size="12.5">Managed compute tier</text>
+  <text x="776" y="414" class="title" font-size="12.5">Team (hosted) and Managed compute tiers</text>
 
   <!-- D: hybrid -->
   <rect x="1125" y="170" width="345" height="300" rx="8" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.75" stroke-dasharray="6 4"/>
@@ -348,7 +348,7 @@ svg .gap{fill:var(--accent);}
   <rect x="30" y="680" width="1440" height="96" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
   <text x="50" y="708" class="title" font-size="14">Identity · runtime registrations · agent and service credentials · policy · audit · installer downloads</text>
   <text x="50" y="732" font-size="12.5">Optional for A (a lone runtime needs no account) · central to B and C · bridges D · customer-run or vendor-hosted, never vendor-owned authority</text>
-  <text x="50" y="756" class="small">Today's build is a vendor-style multi-tenant operator console; ADR-001 reshapes it into this model.</text>
+  <text x="50" y="756" class="small">Open: the authority domain itself. Proprietary: SSO/SCIM, audit retention, policy, federation, and the operator/billing layer. Today's build still has the multi-tenant operator behaviour; ADR-001 reshapes it.</text>
 </svg>
     </div>
     <figcaption><b>Evidence only:</b> the consuming agent brings its own model; Knovara returns cited context. Forms A and B differ only in which implementations sit under the shared engine contracts (selected by a Runtime:Mode setting, Local or Server, that arrives with the local runtime), so the
@@ -361,7 +361,7 @@ svg .gap{fill:var(--accent);}
     </div>
   </figure>
 
-  <p class="note"><b>Business mapping:</b> A is the free <b>Community</b> tier; B is <b>Team</b> and, with a customer-run authority domain
-    and SSO, <b>Enterprise</b>; C and the compute offered to D are <b>Managed compute</b>. Decisions and open items are in
+  <p class="note"><b>Business mapping:</b> A, and B when a team self-hosts it, are the free <b>Community</b> tier; C, where we host the authority domain, is <b>Team (hosted)</b>;
+    the governance modules (SSO/SCIM, audit retention, policy, federation) are <b>Enterprise</b>, on a customer-run or hosted domain; the compute we run for C and D is <b>Managed compute</b>. Decisions and open items are in
     <span style="color:var(--fg)">business_architecture.md</span> and <span style="color:var(--fg)">system_architecture.md</span> (ADR-001).</p>
 </div>
