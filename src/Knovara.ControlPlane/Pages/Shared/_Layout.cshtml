@@ -7,11 +7,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@(ViewData["Title"] ?? "Knovara") · Knovara Control Plane</title>
+    <link rel="icon" href="~/brand/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="~/brand/knovara-icon.svg" />
     <link rel="stylesheet" href="~/site.css" />
 </head>
 <body>
 <header class="top">
-    <a class="brand" href="/">Knovara <span>Control Plane</span></a>
+    <a class="brand" href="/">
+        <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="/brand/knovara-mark-dark.svg" />
+            <img src="~/brand/knovara-mark.svg" alt="" width="26" height="26" />
+        </picture>
+        <span>Knovara <span>Control Plane</span></span>
+    </a>
     @if (me is not null)
     {
         <nav>

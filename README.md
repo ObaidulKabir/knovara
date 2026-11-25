@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/knovara-logo-dark.svg">
+    <img src="assets/brand/knovara-logo.svg" alt="Knovara" width="420">
+  </picture>
+</p>
+
 # Knovara
 
 Application for **Knovara** (knovara.net), the context retrieval and optimization engine described in
@@ -461,7 +468,7 @@ docker compose -f infra/docker-compose.yml down -v; docker compose -f infra/dock
 ## License
 
 Knovara is licensed under the [Apache License 2.0](LICENSE); see [`NOTICE`](NOTICE) for attribution. Contributions are accepted under the Developer Certificate of Origin
-(sign off your commits with `git commit -s`); see [`CONTRIBUTING.md`](CONTRIBUTING.md). The licence does not cover the Knovara name or logo. What is open and what is a paid, proprietary
+(sign off your commits with `git commit -s`); see [`CONTRIBUTING.md`](CONTRIBUTING.md). The licence does not cover the Knovara name or logo (see [`assets/brand`](assets/brand/README.md) for the logos and their usage rules). What is open and what is a paid, proprietary
 module is set out in [`business_model_and_monetization_policy.md`](business_model_and_monetization_policy.md).
 
 ## Next steps

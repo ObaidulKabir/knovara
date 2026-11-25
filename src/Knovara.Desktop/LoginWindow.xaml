@@ -1,16 +1,20 @@
 <Window x:Class="Knovara.Desktop.LoginWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Knovara - Connect" Height="560" Width="500"
+        Title="Knovara - Connect" Icon="Assets/knovara.ico" Height="560" Width="500"
         MinHeight="420" MinWidth="440"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         Background="#F8FAFC">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="22">
 
-            <StackPanel Margin="0,0,0,16">
-                <TextBlock Text="Knovara SaaS Desktop" FontSize="20" FontWeight="Bold" Foreground="#1E293B"/>
-                <TextBlock x:Name="SubtitleText" Text="Register this PC with your organization" FontSize="12" Foreground="#64748B" Margin="0,2,0,0"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                <Image Source="Assets/knovara-mark-256.png" Width="44" Height="44" Margin="0,0,14,0"
+                       VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Knovara SaaS Desktop" FontSize="20" FontWeight="Bold" Foreground="#1E293B"/>
+                    <TextBlock x:Name="SubtitleText" Text="Register this PC with your organization" FontSize="12" Foreground="#64748B" Margin="0,2,0,0"/>
+                </StackPanel>
             </StackPanel>
 
             <!-- Shown when this PC is already enrolled -->

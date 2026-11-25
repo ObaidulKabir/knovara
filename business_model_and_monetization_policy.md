@@ -84,7 +84,8 @@ Why: the open part is the plumbing a customer must be able to run, inspect and r
 
 ### 3.4 Name and trademark
 
-- **[Open]** Apache-2.0 grants no rights to the Knovara name or logo, which is what a hosting competitor cannot copy. A trademark policy (forks may not imply endorsement) and registration are to be decided.
+- **[Decided]** The Knovara name and logo (added 2026-11-25, `assets/brand/`) are trademarks of the project and are not licensed by Apache-2.0. The interim usage rule is in `assets/brand/README.md`: unmodified use to refer to Knovara is fine; implying that a product, fork or service is official or endorsed is not.
+- **[Open]** A formal trademark policy and registration, which is what a hosting competitor cannot copy.
 
 ### 3.5 Third-party services
 

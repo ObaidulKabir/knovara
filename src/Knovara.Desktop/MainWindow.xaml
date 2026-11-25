@@ -1,7 +1,7 @@
 <Window x:Class="Knovara.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Knovara Desktop Client" Height="820" Width="1060"
+        Title="Knovara Desktop Client" Icon="Assets/knovara.ico" Height="820" Width="1060"
         MinHeight="660" MinWidth="900"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip" Background="#F8FAFC">
     <Grid Margin="15">
@@ -18,10 +18,18 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="Knovara Desktop" FontSize="20" FontWeight="Bold" Foreground="#0F172A"/>
-                    <TextBlock x:Name="ConnectionInfoText" Text="Connecting..." FontSize="12" Foreground="#64748B" Margin="0,3,10,0" TextWrapping="Wrap"/>
-                </StackPanel>
+                <Grid Grid.Column="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Image Grid.Column="0" Source="Assets/knovara-mark-256.png" Width="38" Height="38" Margin="0,0,12,0"
+                           VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Knovara Desktop" FontSize="20" FontWeight="Bold" Foreground="#0F172A"/>
+                        <TextBlock x:Name="ConnectionInfoText" Text="Connecting..." FontSize="12" Foreground="#64748B" Margin="0,3,10,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
                 <Button Grid.Column="1" Content="Disconnect / Switch Tenant" Click="OnDisconnectClicked"
                         Background="#F1F5F9" Foreground="#334155" BorderBrush="#CBD5E1" BorderThickness="1" 
                         Padding="12,6" Cursor="Hand" VerticalAlignment="Center"/>

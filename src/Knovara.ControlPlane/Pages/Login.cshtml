@@ -8,6 +8,10 @@
 }
 
 <div class="login card">
+    <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="/brand/knovara-mark-dark.svg" />
+        <img class="login-logo" src="~/brand/knovara-mark.svg" alt="Knovara" width="48" height="48" />
+    </picture>
     <h1>Sign in</h1>
     <p class="sub">Knovara control plane</p>
     @if (Error is not null) { <div class="notice err">@Error</div> }

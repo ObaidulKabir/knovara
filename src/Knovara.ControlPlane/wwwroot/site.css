@@ -16,8 +16,11 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.brand { font-weight: 700; font-size: 17px; color: var(--text); }
-.brand span { font-weight: 400; color: var(--muted); }
+.brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; color: var(--text); }
+.brand:hover { text-decoration: none; }
+.brand img { display: block; }
+.login-logo { display: block; margin: 0 0 14px; }
+.brand span span { font-weight: 400; color: var(--muted); }
 .top nav { display: flex; gap: 16px; flex: 1; }
 .who { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .who form { margin: 0; }
