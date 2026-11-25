@@ -122,7 +122,7 @@ Revenue concentrates in managed hosting and in Enterprise governance, so the Ent
 
 - The Community tier must work with **no account and no network** (ADR-001 in `system_architecture.md`); paid features may require an account without affecting that.
 - Everything in the repository today is open, so **no repository split and no history rewrite are needed now**. The Apache-2.0 `LICENSE`, a `NOTICE` and a DCO-based
-  `CONTRIBUTING.md` can be added; this is a public legal step and waits for explicit confirmation.
+  `CONTRIBUTING.md` were added on 2026-11-25.
 - Proprietary modules live in a separate private repository (name to be chosen) and attach to the open control plane through **extension points** that do not exist yet:
   an audit sink, an identity provider (for SSO/SCIM), a policy evaluator and an operator/provisioning interface. Designing those seams is the first control-plane work.
 - The open control plane is reshaped as one customer's authority domain (ADR-001); the multi-tenant operator behaviour it has today moves to the proprietary operator layer.

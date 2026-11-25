@@ -384,7 +384,7 @@ This control plane was built before the local runtime, as a multi-tenant service
 for them), with enrollment optional: Knovara itself is meant to run fully locally without any account. Treat the multi-tenant
 operator model described here as the current behaviour, not the destination.
 
-Licensing direction (decided, see `business_architecture.md`): this authority-domain code is part of the open core and is intended to be released under Apache-2.0.
+Licensing direction (decided, see `business_architecture.md`): this authority-domain code is part of the open core and is released under Apache-2.0 (see `LICENSE`).
 SSO/SCIM, audit retention, the policy engine, federation management and the multi-customer operator layer will be separate, proprietary modules that attach to it;
 none of them is in this repository.
 
@@ -457,6 +457,12 @@ it, rebuild and recreate the volume (this deletes stored data):
 ```powershell
 docker compose -f infra/docker-compose.yml down -v; docker compose -f infra/docker-compose.yml up -d --build postgres
 ```
+
+## License
+
+Knovara is licensed under the [Apache License 2.0](LICENSE); see [`NOTICE`](NOTICE) for attribution. Contributions are accepted under the Developer Certificate of Origin
+(sign off your commits with `git commit -s`); see [`CONTRIBUTING.md`](CONTRIBUTING.md). The licence does not cover the Knovara name or logo. What is open and what is a paid, proprietary
+module is set out in [`business_model_and_monetization_policy.md`](business_model_and_monetization_policy.md).
 
 ## Next steps
 

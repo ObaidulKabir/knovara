@@ -74,7 +74,7 @@ Why: the open part is the plumbing a customer must be able to run, inspect and r
 
 - **[Decided]** The open-source licence is **Apache-2.0**.
 - **[Decided]** Contributions use **DCO sign-off**. There is no CLA, so the open code cannot be relicensed later without contributors' agreement.
-- **[Proposed]** Add `LICENSE`, `NOTICE` and `CONTRIBUTING.md` (with the DCO text) to the repository. This is a public legal step and waits for explicit confirmation. Everything in the repository today is open, so no split and no history rewrite are required.
+- **[Decided]** `LICENSE` (Apache-2.0), `NOTICE` and `CONTRIBUTING.md` (with the DCO text) were added to the repository on 2026-11-25. The copyright line reads "The Knovara Authors", a neutral default to replace with the legal owner's name if that differs. Everything in the repository is open, so no split and no history rewrite were required.
 
 ### 3.3 Proprietary modules
 
@@ -249,7 +249,8 @@ Unit-economics figures are **[Open]** until pilots give real usage.
 | 2026-11-25 | Control plane becomes one customer's authority domain | ADR-001 |
 | 2026-11-25 | First paying customer: engineering teams and small companies | |
 | 2026-11-25 | Revenue model: open core | |
-| 2026-11-25 | Open-source licence: Apache-2.0 | `LICENSE` file not yet added |
+| 2026-11-25 | Open-source licence: Apache-2.0 | |
+| 2026-11-25 | `LICENSE`, `NOTICE`, `CONTRIBUTING.md` added | Copyright holder is "The Knovara Authors" by default |
 | 2026-11-25 | "No paid third-party services" applies to the product, not to business tooling | |
 | 2026-11-25 | Control plane boundary: open authority, paid governance | Section 3.1 |
 | 2026-11-25 | Contributor terms: DCO sign-off, no CLA | |
@@ -261,7 +262,9 @@ Unit-economics figures are **[Open]** until pilots give real usage.
 | Item | Blocks | Notes |
 |---|---|---|
 | Confirm the Community commitments (5.2) and "will not do" list (5.3) | Publishing any policy | Promises customers will rely on |
-| Add `LICENSE`, `NOTICE`, `CONTRIBUTING.md` | Accepting outside contributions | Waits for explicit confirmation |
+| Confirm the copyright holder named in `NOTICE` ("The Knovara Authors") | Registering the trademark, any sale of the code | Replace with the legal owner if different |
+| Ship third-party licence notices with the desktop installer | Distributing the installer to others | The installer bundles the .NET runtime and WPF libraries (MIT), whose notices must travel with them |
+| Automated DCO check on pull requests | Accepting outside contributions at volume | Sign-off is checked by hand until then |
 | Token-savings benchmark | All pricing and savings claims | First milestone |
 | Seat or registered runtime as the Team unit | Team price list | Decide with pilot input |
 | Trademark policy and registration | Public launch | |
