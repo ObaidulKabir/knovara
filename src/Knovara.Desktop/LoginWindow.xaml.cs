@@ -5,12 +5,15 @@ using System.Text.Json.Nodes;
 using System.Net.Http;
 using System.Windows;
 using Knovara.Common.Device;
+using Knovara.Common.Runtime;
 
 namespace Knovara.Desktop
 {
     public partial class LoginWindow : Window
     {
         private const string ConfigPath = "knovara.config.json";
+        private const string LocalApiUrl = "http://127.0.0.1:5299";
+        private const string LocalTenantId = "local";
 
         // One client for the life of the app (sockets are not meant to be created per request).
         private static readonly HttpClient ControlPlaneHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
@@ -35,14 +38,28 @@ namespace Knovara.Desktop
 
             EnrolledPanel.Visibility = enrolled ? Visibility.Visible : Visibility.Collapsed;
             EnrollPanel.Visibility = enrolled ? Visibility.Collapsed : Visibility.Visible;
-            SubtitleText.Text = enrolled ? "Welcome back" : "Register this PC with your organization";
-            ConnectEnrolledButton.IsDefault = enrolled;
-            EnrollButton.IsDefault = !enrolled;
+            // "Use Knovara on this PC" is the primary path (no account); a PC already enrolled with a team
+            // server most likely wants that instead, so its panel opens expanded rather than collapsed.
+            TeamExpander.IsExpanded = enrolled;
 
             if (_identity is not null)
             {
                 EnrolledDetailText.Text = $"Tenant: {_identity.TenantId}\nControl plane: {_identity.ControlPlaneUrl}\nDevice id: {_identity.DeviceId}";
             }
+        }
+
+        /// <summary>Starts the local runtime (if it is not already running) and opens it directly, with no account and no server to set up.</summary>
+        private async void OnUseLocalClicked(object sender, RoutedEventArgs e)
+        {
+            UseLocalButton.IsEnabled = false;
+            UseLocalButton.Content = "Starting…";
+            UseLocalStatusText.Visibility = Visibility.Visible;
+            UseLocalStatusText.Text = "Starting the local runtime (the first run can take a few seconds)…";
+
+            await LocalRuntimeLauncher.EnsureRunningAsync(LocalApiUrl, warn: message => Dispatcher.Invoke(() => UseLocalStatusText.Text = message));
+
+            new MainWindow(LocalApiUrl, LocalTenantId, string.Empty).Show();
+            Close();
         }
 
         private async void OnEnrollClicked(object sender, RoutedEventArgs e)

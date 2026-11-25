@@ -26,6 +26,7 @@
     <ProjectReference Include="..\Knovara.ContextMemory\Knovara.ContextMemory.csproj" />
     <ProjectReference Include="..\Knovara.Evaluation\Knovara.Evaluation.csproj" />
     <ProjectReference Include="..\Knovara.Models\Knovara.Models.csproj" />
+    <ProjectReference Include="..\Knovara.Local\Knovara.Local.csproj" />
   </ItemGroup>
 
 </Project>

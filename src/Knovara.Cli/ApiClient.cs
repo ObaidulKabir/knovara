@@ -33,6 +33,15 @@ public sealed class ApiClient : IDisposable
     public Task<ResourceReference> IngestAsync(string uri, string type, CancellationToken ct) =>
         PostAsync<ResourceReference>("api/resources/ingest", new { uri, type }, ct);
 
+    /// <summary>Uploads a local file's content, so the server (which may be on another machine, or just the local
+    /// runtime, which has no source folder by default) never needs to read this path itself.</summary>
+    public async Task<ResourceReference> UploadAsync(string filePath, CancellationToken ct)
+    {
+        var bytes = await File.ReadAllBytesAsync(filePath, ct);
+        return await PostAsync<ResourceReference>("api/resources/upload",
+            new { fileName = Path.GetFileName(filePath), contentBase64 = Convert.ToBase64String(bytes) }, ct);
+    }
+
     public async Task<ResourceReference?> GetResourceAsync(string resourceId, CancellationToken ct)
     {
         using var response = await _http.GetAsync($"api/resources/{resourceId}", ct);

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Knovara.Core.Contracts;
+using Knovara.Core.Ingestion;
 using Knovara.Core.Models;
 using Microsoft.AspNetCore.Mvc;
 
@@ -27,7 +28,6 @@ public sealed partial class ResourcesController(
     IContextMemoryService memory,
     IModelService models) : ControllerBase
 {
-    private const string IndexVersion = "idx-v1";
     private const int MaxUriLength = 2_048;
     private const int MaxErrorLength = 2_000;
     private const int MaxPageSize = 500;
@@ -267,49 +267,13 @@ public sealed partial class ResourcesController(
     {
         if (!IsContentHash(request.ContentHash)) return Problem(statusCode: 400, title: "contentHash must be 'sha256:' followed by 64 lowercase hex digits.");
 
-        var resource = await store.GetResourceAsync(tenantId, resourceId, ct);
-        if (resource is null) return NotFound();
-
-        IReadOnlyList<KnowledgeNode> nodes;
-        try
+        var outcome = await new ExtractionCommitter(store, knowledge, memory, models).CommitAsync(tenantId, resourceId, request.ContentHash, request.Nodes, ct);
+        return outcome.Status switch
         {
-            nodes = knowledge.BuildHierarchy(resource, request.Nodes);
-        }
-        catch (HierarchyValidationException ex)
-        {
-            await store.MarkFailedAsync(tenantId, resourceId, $"Invalid extraction: {ex.Message}", ct);
-            return Problem(statusCode: 400, title: "Invalid extraction.", detail: ex.Message);
-        }
-
-        var model = await models.GetInfoAsync(ct);
-        var passages = nodes.Where(n => n.OriginalContent is not null).ToList();
-        var embeddings = new Dictionary<string, float[]>();
-        if (passages.Count > 0)
-        {
-            // Contextual embedding: the heading path goes in front of the passage text, the same way
-            // a human would read it with its surrounding context (system_architecture.md "Multi-Dimensional Indexing").
-            var vectors = await models.EmbedPassagesAsync(passages.Select(n => $"{n.Title}\n{n.OriginalContent}").ToList(), ct);
-            foreach (var (node, vector) in passages.Zip(vectors))
-            {
-                embeddings[node.NodeId] = vector;
-            }
-        }
-
-        var commit = await store.CommitVersionAsync(tenantId, resourceId, request.ContentHash, nodes, embeddings, model.EmbeddingModel, ct);
-        if (commit is null) return NotFound();
-
-        if (commit.Applied)
-        {
-            if (commit.SupersededVersion is not null)
-            {
-                await memory.PurgeSupersededAsync(tenantId, resourceId, commit.SupersededVersion, ct);
-            }
-
-            var cacheKey = new CacheKey(resourceId, request.ContentHash, IndexVersion, model.EmbeddingModel, tenantId);
-            await memory.SetCachedDocumentKnowledgeAsync(cacheKey, nodes, ct);
-        }
-
-        return Ok(commit.Resource);
+            ExtractionStatus.NotFound => NotFound(),
+            ExtractionStatus.Invalid => Problem(statusCode: 400, title: "Invalid extraction.", detail: outcome.Error),
+            _ => Ok(outcome.Resource)
+        };
     }
 
     [HttpPost("{resourceId}/failure")]

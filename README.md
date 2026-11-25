@@ -233,18 +233,22 @@ integration test through the real JWT pipeline needs `Microsoft.AspNetCore.Mvc.T
 `Knovara.Cli` is a thin usability shell over those endpoints — the kind of demonstration/dogfooding
 layer system_architecture.md's "Application Type & Deployment Model" calls for alongside the core
 engine, not a design investment. It has no project reference to the server: it speaks the same
-public HTTP contract any external client would.
+public HTTP contract any external client would. The installer puts it on `PATH` as `knovara`.
 
 ```powershell
-dotnet run --project src/Knovara.Cli -- ingest samples/payment-service-guide.md --tenant acme
-dotnet run --project src/Knovara.Cli -- watch  <resourceId> --tenant acme
-dotnet run --project src/Knovara.Cli -- ask    "how long are payment logs retained" --tenant acme
-dotnet run --project src/Knovara.Cli -- search "maximum retry interval" --mode Semantic --tenant acme
+knovara ingest samples/payment-service-guide.md
+knovara watch  <resourceId>
+knovara ask    "how long are payment logs retained"
+knovara search "maximum retry interval" --mode Semantic
 ```
 
-`--api` (default `http://127.0.0.1:5299`, or `$KNOVARA_API_URL`) and `--tenant` (required: pass it
-or set `$KNOVARA_TENANT`) work on every command. Run `dotnet run --project src/Knovara.Cli -- help`
-for the full list. `status`/`watch` show a failed resource's reason.
+`--api` (default `http://127.0.0.1:5299`, or `$KNOVARA_API_URL`) and `--tenant` (default `local`; pass it
+or set `$KNOVARA_TENANT` to keep separate document sets on the same runtime) work on every command. Run
+`knovara help` for the full list. `status`/`watch` show a failed resource's reason. Against the default
+local address, the CLI starts the installed runtime automatically if it is not already running - nothing
+else needs to be running first. From a checkout rather than the installer, run with
+`dotnet run --project src/Knovara.Cli -- <command>` instead; the local runtime then needs to be started by
+hand (see "Run locally"), since `KNOVARA_RUNTIME_EXE` is not set.
 
 ## MCP server
 
@@ -271,18 +275,22 @@ Configuration is by environment variable:
 
 | Variable | |
 |---|---|
-| `KNOVARA_TENANT_ID` | **Required.** The one tenant this server can touch. |
+| `KNOVARA_TENANT_ID` | Default `local` (the local runtime is single-user). A team/SaaS server needs a real tenant. |
 | `KNOVARA_API_URL` | Default `http://127.0.0.1:5299`. |
 | `KNOVARA_JWT` | Bearer token, when the API runs with `Authentication:Enabled`. |
 
 The tenant is deliberately server configuration and not a tool argument, so a model (or text injected into a
-document it read) cannot switch to another tenant's data. The server exits with an error if it is not set.
+document it read) cannot switch to another tenant's data.
 
-Build once, then register it with your client (use the absolute path to the built exe):
+**Installed via the installer:** check the "Register knovara-mcp with Claude Code" task during setup, or run
+`installer\register-mcp.ps1` any time afterwards - it finds the installed `knovara-mcp.exe` and calls `claude mcp
+add` for you (or prints the JSON to add by hand, if the `claude` CLI isn't on `PATH`).
+
+**From a checkout**, build once, then register it with your client (use the absolute path to the built exe):
 
 ```powershell
 dotnet build src/Knovara.Mcp
-claude mcp add knovara --env KNOVARA_TENANT_ID=acme -- "C:\path\to\src\Knovara.Mcp\bin\Debug\net10.0\knovara-mcp.exe"
+claude mcp add knovara -- "C:\path\to\src\Knovara.Mcp\bin\Debug\net10.0\knovara-mcp.exe"
 ```
 
 or in a client's JSON config (`.mcp.json`, Claude Desktop's `claude_desktop_config.json`):
@@ -291,14 +299,14 @@ or in a client's JSON config (`.mcp.json`, Claude Desktop's `claude_desktop_conf
 {
   "mcpServers": {
     "knovara": {
-      "command": "C:\\path\\to\\src\\Knovara.Mcp\\bin\\Debug\\net10.0\\knovara-mcp.exe",
-      "env": { "KNOVARA_TENANT_ID": "acme", "KNOVARA_API_URL": "http://127.0.0.1:5299" }
+      "command": "C:\\path\\to\\src\\Knovara.Mcp\\bin\\Debug\\net10.0\\knovara-mcp.exe"
     }
   }
 }
 ```
 
-The API must be running (see "Run locally"). `knovara_ingest` takes URLs or files in the worker's source
+Against the default local address, the server starts the installed runtime automatically if it is not
+already running; from a checkout, start the API by hand first (see "Run locally"). `knovara_ingest` takes URLs or files in the worker's source
 volume, not paths on the client machine; to add content you hold, use `knovara_upload_document` (text/markdown;
 the REST upload endpoint also takes pdf, docx, pptx and html). Over stdio the server only
 speaks to the local client that launched it; it opens no network port.
@@ -365,24 +373,48 @@ Desktop-facing endpoints (JSON, no cookie): `POST /api/enroll` `{ code, deviceNa
 newest published installer version), `GET /api/releases/latest` (public version metadata). Enrollment is rate limited
 per IP and answers an unknown, expired, revoked or used-up code identically.
 
-### Desktop installer
+### Installer
 
 The dashboard's **Downloads** page lists published installers with their SHA-256; any signed-in user can download
-one, and the operator uploads new versions (`.exe`, `.msi` or `.zip`) and chooses which is current. Build one with:
+one, and the operator uploads new versions (`.exe`, `.msi` or `.zip`) and chooses which is current. It also works
+with no control plane at all - see "Front door: install it, no Docker, no account" below. Build one with:
 
 ```powershell
+.\installer\fetch-models.ps1                                              # once per build machine; caches ~160 MB
 .\installer\build-installer.ps1 -Version 1.1.0 -ControlPlaneUrl https://control.example.com
 ```
 
-That publishes the app self-contained (users do not need .NET), then compiles `installer/knovara.iss` with
-[Inno Setup 6](https://jrsoftware.org/isinfo.php) (free) into `artifacts/installer/Knovara-Desktop-Setup-1.1.0.exe`.
-It installs per user (no administrator rights), adds a Start Menu entry and uninstaller, and pre-fills the
-enrollment screen with `-ControlPlaneUrl` so users only need their code. Uninstalling keeps the enrollment, so
-upgrades do not make anyone enroll again. A running app shows *Update available* when the control plane has a newer
-current version than the one installed.
+`fetch-models.ps1` downloads the two open-weight ONNX models (bge-small, the MiniLM reranker) straight from their
+public Hugging Face repos, so the installer can bundle them and installed Knovara needs no network at all. Then
+`build-installer.ps1` publishes the desktop app, the local runtime, the `knovara` CLI and the `knovara-mcp` server
+self-contained (users need no .NET or Python), and compiles `installer/knovara.iss` with
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) (free) into `artifacts/installer/Knovara-Setup-1.1.0.exe`.
+It installs per user (no administrator rights), adds a Start Menu entry and uninstaller, optionally puts `knovara`
+on `PATH` and registers `knovara-mcp` with Claude Code, and pre-fills the enrollment screen with `-ControlPlaneUrl`
+when one is given. Uninstalling keeps your documents and enrollment (under `%LOCALAPPDATA%\Knovara`), so upgrades
+never lose data or make anyone enroll again. A running app shows *Update available* when the control plane has a
+newer current version than the one installed.
 
 **The installer is not code-signed**, so Windows SmartScreen warns on first run until you sign it with a certificate
 you buy; the dashboard publishes checksums so downloads can at least be verified.
+
+### Front door: install it, no Docker, no account
+
+Knovara is consumed first by agents (MCP, the CLI, a localhost API), not by signing in to this control plane - see
+`system_architecture.md` ADR-001. The installer above sets up everything that needs:
+
+- **The local runtime** (`Knovara.Api.exe`, `Runtime:Mode=Local`): SQLite store and full-text/vector index, in-process
+  ingestion and the two bundled ONNX models - no Postgres, RabbitMQ, model-service container or Docling worker.
+  It is not a Windows service; the CLI, the MCP server and the desktop app each start it on first use (if it is not
+  already running) and it keeps running in the background. Its database, models and log live under
+  `%LOCALAPPDATA%\Knovara`.
+- **`knovara` on PATH** (the "Add the knovara command to PATH" task): `knovara ingest <file>`, `knovara ask "..."`,
+  etc. work from any terminal with no flags - `--tenant` defaults to `local`, and `--api` to the local runtime.
+- **`knovara-mcp` registered with Claude Code** (the "Register knovara-mcp with Claude Code" task, or re-run
+  `installer\register-mcp.ps1` any time): Claude can ground answers in whatever you add, right after installing.
+- **The desktop app's "Use Knovara on this PC"** panel (now the primary option on its connect screen): starts the
+  runtime and opens straight into it, no enrollment code needed. "Connect to a team or organization server" (this
+  control plane) is still there, for the team/SaaS case.
 
 ### Direction
 

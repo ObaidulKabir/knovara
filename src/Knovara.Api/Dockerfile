@@ -12,6 +12,7 @@ COPY src/Knovara.ContextOptimization/Knovara.ContextOptimization.csproj src/Knov
 COPY src/Knovara.ContextMemory/Knovara.ContextMemory.csproj src/Knovara.ContextMemory/
 COPY src/Knovara.Evaluation/Knovara.Evaluation.csproj src/Knovara.Evaluation/
 COPY src/Knovara.Models/Knovara.Models.csproj src/Knovara.Models/
+COPY src/Knovara.Local/Knovara.Local.csproj src/Knovara.Local/
 RUN dotnet restore src/Knovara.Api/Knovara.Api.csproj
 
 COPY src/ src/

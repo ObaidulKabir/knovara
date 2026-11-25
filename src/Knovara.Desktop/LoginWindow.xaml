@@ -12,59 +12,77 @@
                 <Image Source="Assets/knovara-mark-256.png" Width="44" Height="44" Margin="0,0,14,0"
                        VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="Knovara SaaS Desktop" FontSize="20" FontWeight="Bold" Foreground="#1E293B"/>
-                    <TextBlock x:Name="SubtitleText" Text="Register this PC with your organization" FontSize="12" Foreground="#64748B" Margin="0,2,0,0"/>
+                    <TextBlock Text="Knovara Desktop" FontSize="20" FontWeight="Bold" Foreground="#1E293B"/>
+                    <TextBlock x:Name="SubtitleText" Text="Runs on this PC - no account needed" FontSize="12" Foreground="#64748B" Margin="0,2,0,0"/>
                 </StackPanel>
             </StackPanel>
 
-            <!-- Shown when this PC is already enrolled -->
-            <Border x:Name="EnrolledPanel" Visibility="Collapsed" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
+            <!-- Primary path: the local runtime the installer sets up. No account, no server, works offline. -->
+            <Border Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
                 <StackPanel>
-                    <TextBlock Text="✔ This PC is registered" FontWeight="Bold" Foreground="#166534" FontSize="14"/>
-                    <TextBlock x:Name="EnrolledDetailText" TextWrapping="Wrap" Foreground="#475569" Margin="0,6,0,12"/>
-                    <StackPanel Orientation="Horizontal">
-                        <Button x:Name="ConnectEnrolledButton" Content="Connect" Click="OnConnectEnrolledClicked" Width="120" Height="34"
-                                Background="#2563EB" Foreground="White" FontWeight="SemiBold" Cursor="Hand" Margin="0,0,10,0"/>
-                        <Button x:Name="ForgetButton" Content="Forget this device" Click="OnForgetClicked" Height="34" Padding="12,0"
-                                ToolTip="Removes the saved registration from this PC. To free the slot, also revoke the device in the dashboard."
-                                Background="#F1F5F9" Foreground="#334155" BorderBrush="#CBD5E1" Cursor="Hand"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <!-- Shown when it is not -->
-            <Border x:Name="EnrollPanel" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
-                <StackPanel>
-                    <TextBlock Text="Enroll with Knovara" FontWeight="Bold" Foreground="#1E293B" FontSize="14"/>
-                    <TextBlock Text="Ask your administrator for the control plane address and an enrollment code."
+                    <TextBlock Text="Use Knovara on this PC" FontWeight="Bold" Foreground="#1E293B" FontSize="14"/>
+                    <TextBlock Text="Starts the local runtime if it isn't already running. Your documents stay on this machine."
                                TextWrapping="Wrap" FontSize="12" Foreground="#64748B" Margin="0,2,0,12"/>
-
-                    <TextBlock Text="Control plane address:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
-                    <TextBox x:Name="ControlPlaneBox" Text="http://localhost:5400" Margin="0,0,0,10" Padding="6" FontSize="13"/>
-
-                    <TextBlock Text="Enrollment code:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
-                    <TextBox x:Name="CodeBox" Margin="0,0,0,10" Padding="6" FontSize="14" FontFamily="Consolas" CharacterCasing="Upper"/>
-
-                    <TextBlock Text="Name this PC:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
-                    <TextBox x:Name="DeviceNameBox" Margin="0,0,0,12" Padding="6" FontSize="13"/>
-
-                    <TextBlock x:Name="EnrollErrorText" Foreground="#B91C1C" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,10"/>
-
-                    <Button x:Name="EnrollButton" Content="Enroll this PC" Click="OnEnrollClicked" Width="140" Height="34" HorizontalAlignment="Left"
-                            Background="#10B981" Foreground="White" FontWeight="SemiBold" Cursor="Hand" IsDefault="True"/>
+                    <TextBlock x:Name="UseLocalStatusText" TextWrapping="Wrap" FontSize="12" Foreground="#64748B" Visibility="Collapsed" Margin="0,0,0,8"/>
+                    <Button x:Name="UseLocalButton" Content="Start" Click="OnUseLocalClicked" Width="140" Height="34" HorizontalAlignment="Left"
+                            Background="#2563EB" Foreground="White" FontWeight="SemiBold" Cursor="Hand" IsDefault="True"/>
                 </StackPanel>
             </Border>
 
-            <!-- Direct connection, for development against a local API without a control plane -->
-            <Expander x:Name="DeveloperExpander" Header="Developer connection (manual API URL, tenant and token)" Foreground="#475569">
+            <!-- Secondary path: a team or organization-run deployment, via the control plane. -->
+            <Expander x:Name="TeamExpander" Header="Connect to a team or organization server" Foreground="#475569" Margin="0,0,0,14">
+                <StackPanel Margin="0,10,0,0">
+
+                    <!-- Shown when this PC is already enrolled -->
+                    <Border x:Name="EnrolledPanel" Visibility="Collapsed" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="✔ This PC is registered" FontWeight="Bold" Foreground="#166534" FontSize="14"/>
+                            <TextBlock x:Name="EnrolledDetailText" TextWrapping="Wrap" Foreground="#475569" Margin="0,6,0,12"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="ConnectEnrolledButton" Content="Connect" Click="OnConnectEnrolledClicked" Width="120" Height="34"
+                                        Background="#2563EB" Foreground="White" FontWeight="SemiBold" Cursor="Hand" Margin="0,0,10,0"/>
+                                <Button x:Name="ForgetButton" Content="Forget this device" Click="OnForgetClicked" Height="34" Padding="12,0"
+                                        ToolTip="Removes the saved registration from this PC. To free the slot, also revoke the device in the dashboard."
+                                        Background="#F1F5F9" Foreground="#334155" BorderBrush="#CBD5E1" Cursor="Hand"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Shown when it is not -->
+                    <Border x:Name="EnrollPanel" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="Enroll with Knovara" FontWeight="Bold" Foreground="#1E293B" FontSize="14"/>
+                            <TextBlock Text="Ask your administrator for the control plane address and an enrollment code."
+                                       TextWrapping="Wrap" FontSize="12" Foreground="#64748B" Margin="0,2,0,12"/>
+
+                            <TextBlock Text="Control plane address:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
+                            <TextBox x:Name="ControlPlaneBox" Text="http://localhost:5400" Margin="0,0,0,10" Padding="6" FontSize="13"/>
+
+                            <TextBlock Text="Enrollment code:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
+                            <TextBox x:Name="CodeBox" Margin="0,0,0,10" Padding="6" FontSize="14" FontFamily="Consolas" CharacterCasing="Upper"/>
+
+                            <TextBlock Text="Name this PC:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
+                            <TextBox x:Name="DeviceNameBox" Margin="0,0,0,12" Padding="6" FontSize="13"/>
+
+                            <TextBlock x:Name="EnrollErrorText" Foreground="#B91C1C" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,10"/>
+
+                            <Button x:Name="EnrollButton" Content="Enroll this PC" Click="OnEnrollClicked" Width="140" Height="34" HorizontalAlignment="Left"
+                                    Background="#10B981" Foreground="White" FontWeight="SemiBold" Cursor="Hand"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Expander>
+
+            <!-- Advanced: a non-default local address/tenant, or a bearer token for a server that has auth enabled. -->
+            <Expander x:Name="DeveloperExpander" Header="Advanced: custom address, tenant or token" Foreground="#475569">
                 <StackPanel Margin="0,10,0,0">
                     <TextBlock Text="API Base URL:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
-                    <TextBox x:Name="BaseUrlBox" Text="http://localhost:5299" Margin="0,0,0,12" Padding="6" FontSize="13"/>
+                    <TextBox x:Name="BaseUrlBox" Text="http://127.0.0.1:5299" Margin="0,0,0,12" Padding="6" FontSize="13"/>
 
                     <TextBlock Text="Tenant ID:" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
-                    <TextBox x:Name="TenantBox" Text="acme" Margin="0,0,0,12" Padding="6" FontSize="13"/>
+                    <TextBox x:Name="TenantBox" Text="local" Margin="0,0,0,12" Padding="6" FontSize="13"/>
 
-                    <TextBlock Text="JWT Token (optional for dev mode):" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
+                    <TextBlock Text="JWT Token (optional, only if the server has Authentication:Enabled):" FontWeight="SemiBold" Margin="0,0,0,4" Foreground="#475569"/>
                     <TextBox x:Name="TokenBox" Margin="0,0,0,12" Padding="6" FontSize="13"/>
 
                     <Button Content="Connect" Click="OnLoginClicked" Width="110" Height="34" HorizontalAlignment="Left"

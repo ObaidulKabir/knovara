@@ -3,6 +3,7 @@ using Knovara.ContextMemory;
 using Knovara.ContextOptimization;
 using Knovara.Evaluation;
 using Knovara.Indexing;
+using Knovara.Local;
 using Knovara.Ingestion;
 using Knovara.KnowledgeRepresentation;
 using Knovara.Models;
@@ -15,9 +16,15 @@ using Knovara.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var postgres = builder.Configuration.GetConnectionString("Postgres")
-    ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required. See README.md \"Run locally\".");
-var modelService = builder.Configuration.GetSection("ModelService").Get<ModelServiceOptions>() ?? new ModelServiceOptions();
+// Runtime:Mode picks the storage and processing stack. Server (default): Postgres, RabbitMQ, the Docling worker and the model
+// service container. Local: one process with SQLite, an in-process queue and extractors, and in-process ONNX models, with no
+// Docker and no network. Retrieval, context optimization and every controller are the same in both.
+var runtimeMode = builder.Configuration["Runtime:Mode"] ?? "Server";
+var localMode = runtimeMode.Equals("Local", StringComparison.OrdinalIgnoreCase);
+if (!localMode && !runtimeMode.Equals("Server", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException($"Runtime:Mode must be 'Local' or 'Server', not '{runtimeMode}'.");
+}
 var tenantAuth = builder.Configuration.GetSection("Authentication").Get<TenantAuthOptions>() ?? new TenantAuthOptions();
 
 // Add services to the container.
@@ -62,17 +69,36 @@ builder.Services.AddOpenApi(options =>
 
 // Knovara pipeline services (see system_architecture.md "Core Components").
 // Context memory and evaluation are still in-memory (Phase 3 moves memory to Redis).
-builder.Services.AddSingleton(NpgsqlDataSource.Create(postgres));
-builder.Services.AddSingleton(builder.Configuration.GetSection("RabbitMq").Get<RabbitMqOptions>() ?? new RabbitMqOptions());
-builder.Services.AddSingleton<IIngestionQueue, RabbitMqIngestionQueue>();
-builder.Services.AddSingleton<IKnowledgeStore, PostgresKnowledgeStore>();
-builder.Services.AddSingleton<IKnowledgeRepresentationService, HierarchyBuilder>();
-builder.Services.AddSingleton<IIndexManagementService, PostgresIndexManagementService>();
-builder.Services.AddHttpClient<IModelService, HttpModelService>(client =>
+if (localMode)
 {
-    client.BaseAddress = new Uri(modelService.BaseUrl.TrimEnd('/') + "/");
-    client.Timeout = TimeSpan.FromSeconds(modelService.TimeoutSeconds);
-});
+    builder.Services.AddKnovaraLocal(builder.Configuration);
+
+    // Set when the CLI or the MCP server launched this runtime hidden (no console): there is otherwise
+    // nowhere to look when ingestion or a query misbehaves.
+    if (builder.Configuration["Local:LogFile"] is { Length: > 0 } logFile)
+    {
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(new Knovara.Local.Diagnostics.FileLoggerProvider(logFile));
+    }
+}
+else
+{
+    var postgres = builder.Configuration.GetConnectionString("Postgres")
+        ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required. See README.md \"Run locally\".");
+    var modelService = builder.Configuration.GetSection("ModelService").Get<ModelServiceOptions>() ?? new ModelServiceOptions();
+
+    builder.Services.AddSingleton(NpgsqlDataSource.Create(postgres));
+    builder.Services.AddSingleton(builder.Configuration.GetSection("RabbitMq").Get<RabbitMqOptions>() ?? new RabbitMqOptions());
+    builder.Services.AddSingleton<IIngestionQueue, RabbitMqIngestionQueue>();
+    builder.Services.AddSingleton<IKnowledgeStore, PostgresKnowledgeStore>();
+    builder.Services.AddSingleton<IIndexManagementService, PostgresIndexManagementService>();
+    builder.Services.AddHttpClient<IModelService, HttpModelService>(client =>
+    {
+        client.BaseAddress = new Uri(modelService.BaseUrl.TrimEnd('/') + "/");
+        client.Timeout = TimeSpan.FromSeconds(modelService.TimeoutSeconds);
+    });
+}
+builder.Services.AddSingleton<IKnowledgeRepresentationService, HierarchyBuilder>();
 builder.Services.AddSingleton(builder.Configuration.GetSection("Retrieval").Get<RetrievalOptions>() ?? new RetrievalOptions());
 builder.Services.AddSingleton<IIntelligentRetrievalService, ProgressiveRetrievalService>();
 builder.Services.AddSingleton<IContextOptimizationService, TokenBudgetContextOptimizationService>();

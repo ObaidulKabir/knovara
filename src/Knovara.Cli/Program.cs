@@ -1,4 +1,5 @@
 using Knovara.Cli;
+using Knovara.Common.Runtime;
 
 var parsed = Args.Parse(args);
 
@@ -10,12 +11,14 @@ if (parsed.Command is null or "help" or "--help" or "-h")
 
 var command = parsed.Command.ToLowerInvariant();
 var apiUrl = parsed.Option("api") ?? Environment.GetEnvironmentVariable("KNOVARA_API_URL") ?? "http://127.0.0.1:5299";
-var tenant = parsed.Option("tenant") ?? Environment.GetEnvironmentVariable("KNOVARA_TENANT");
-if (tenant is null)
-{
-    Console.Error.WriteLine("Missing tenant. Pass --tenant <id> or set the KNOVARA_TENANT environment variable.");
-    return 1;
-}
+
+// A team/SaaS server always has a real tenant; the local runtime is single-user, so "local" needs no
+// setup. Pass --tenant (or $KNOVARA_TENANT) to keep several separate document sets on the same runtime.
+var tenant = parsed.Option("tenant") ?? Environment.GetEnvironmentVariable("KNOVARA_TENANT") ?? "local";
+
+// No-op against a remote --api; against the default loopback address, starts the installed runtime if
+// it is not already running, so a fresh install works right away with nothing to start by hand.
+await LocalRuntimeLauncher.EnsureRunningAsync(apiUrl, warn: msg => Console.Error.WriteLine($"knovara: {msg}"));
 
 using var client = new ApiClient(apiUrl, tenant);
 using var cts = new CancellationTokenSource();
@@ -25,6 +28,7 @@ try
 {
     return await (command switch
     {
+        "add" => Add(client, parsed, cts.Token),
         "ingest" => Ingest(client, parsed, cts.Token),
         "status" => Status(client, parsed, cts.Token),
         "watch" => Watch(client, parsed, cts.Token),
@@ -53,6 +57,60 @@ static Task<int> Unknown(string command)
 {
     Console.Error.WriteLine($"Unknown command '{command}'. Run 'knovara help' for usage.");
     return Task.FromResult(1);
+}
+
+static async Task<int> Add(ApiClient client, Args args, CancellationToken ct)
+{
+    // What the installed (built-in) extractors handle without the Docling worker, plus the formats the
+    // API upload endpoint also accepts for a server that does have one; .txt is accepted and stored as .md.
+    string[] UploadExtensions = [".pdf", ".docx", ".pptx", ".html", ".htm", ".md", ".markdown", ".txt"];
+
+    var path = args.Positional.Count > 0 ? args.Positional[0] : null;
+    if (path is null)
+    {
+        Console.Error.WriteLine("Usage: knovara add <file-or-folder>");
+        return 1;
+    }
+
+    List<string> files;
+    if (Directory.Exists(path))
+    {
+        files = Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+            .Where(f => UploadExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        if (files.Count == 0)
+        {
+            Console.Error.WriteLine($"No supported files under '{path}' ({string.Join(", ", UploadExtensions)}).");
+            return 1;
+        }
+    }
+    else if (File.Exists(path))
+    {
+        files = [path];
+    }
+    else
+    {
+        Console.Error.WriteLine($"'{path}' was not found.");
+        return 1;
+    }
+
+    var failed = 0;
+    foreach (var file in files)
+    {
+        try
+        {
+            var resource = await client.UploadAsync(file, ct);
+            Console.WriteLine($"{Path.GetFileName(file)} -> {resource.ResourceId}  (status: {resource.Status})");
+        }
+        catch (ApiException ex)
+        {
+            failed++;
+            Console.Error.WriteLine($"{Path.GetFileName(file)}: {ex.Message}");
+        }
+    }
+
+    Console.WriteLine($"\n{files.Count - failed}/{files.Count} uploaded. Check progress with 'knovara status <resourceId>'.");
+    return failed == 0 ? 0 : 1;
 }
 
 static async Task<int> Ingest(ApiClient client, Args args, CancellationToken ct)
@@ -219,6 +277,7 @@ static void PrintHelp()
         knovara — thin CLI for the Knovara API
 
         Usage:
+          knovara add    <file-or-folder>
           knovara ingest <uri-or-path> [--type Document|Website]
           knovara status <resourceId>
           knovara watch  <resourceId> [--interval seconds]
@@ -227,12 +286,17 @@ static void PrintHelp()
 
         Global options (any command):
           --api    <url>   API base URL (default http://127.0.0.1:5299, or $KNOVARA_API_URL)
-          --tenant <id>    Tenant id (required: pass --tenant, or set $KNOVARA_TENANT)
+          --tenant <id>    Tenant id (default "local"; pass --tenant, or set $KNOVARA_TENANT, to keep
+                           separate document sets on the same runtime)
+
+        Against the default local address, the installed runtime is started automatically if it is not
+        already running.
 
         Examples:
-          knovara ingest samples/payment-service-guide.md --tenant acme
-          knovara watch 22fa4671d52a4ed68dcb56a47d6e2efb --tenant acme
-          knovara ask "how long are payment logs retained" --tenant acme
-          knovara search "maximum retry interval" --mode Semantic --tenant acme
+          knovara add ./my-notes
+          knovara ingest samples/payment-service-guide.md
+          knovara watch 22fa4671d52a4ed68dcb56a47d6e2efb
+          knovara ask "how long are payment logs retained"
+          knovara search "maximum retry interval" --mode Semantic
         """);
 }

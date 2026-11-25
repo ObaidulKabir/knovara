@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embeddings and rerank scores produced by services/model-service, which the in-process models must reproduce. -->
+    <None Update="Fixtures\model_reference.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Knovara.Local\Knovara.Local.csproj" />
+    <ProjectReference Include="..\Knovara.KnowledgeRepresentation\Knovara.KnowledgeRepresentation.csproj" />
+    <ProjectReference Include="..\Knovara.ContextMemory\Knovara.ContextMemory.csproj" />
+  </ItemGroup>
+
+</Project>

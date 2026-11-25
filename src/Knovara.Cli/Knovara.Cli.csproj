@@ -10,4 +10,10 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Only for LocalRuntimeLauncher (starting the installed runtime on demand); the CLI still talks the
+         same public HTTP contract any external caller would, with no reference to Knovara.Core. -->
+    <ProjectReference Include="..\Knovara.Common\Knovara.Common.csproj" />
+  </ItemGroup>
+
 </Project>
