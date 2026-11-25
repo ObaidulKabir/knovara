@@ -312,8 +312,8 @@ a tenant is removed from the control plane.
  desktop app ──(JWT)───▶ Knovara.Api    (validates the JWT; the tenant comes only from the token)
 ```
 
-**Roles.** A *platform* account (the operator) manages every tenant, account and installer release. A *tenant*
-account administers only its own tenant's devices and enrollment codes; every dashboard action is scoped by the
+**Roles.** A *platform* account (the operator of this deployment) manages its tenants, accounts and installer releases. A
+*tenant* account administers only its own tenant's devices and enrollment codes; every dashboard action is scoped by the
 signed-in account, never by a tenant id in the request, so a tampered link or form cannot reach another tenant.
 Sign-in uses local accounts (salted PBKDF2 hashes, 12+ character passwords, lockout for 15 minutes after 5 failures).
 
@@ -376,6 +376,13 @@ current version than the one installed.
 
 **The installer is not code-signed**, so Windows SmartScreen warns on first run until you sign it with a certificate
 you buy; the dashboard publishes checksums so downloads can at least be verified.
+
+### Direction
+
+This control plane was built before the local runtime, as a multi-tenant service. The architecture decision recorded in
+`system_architecture.md` ("ADR-001") reshapes it as one customer's authority domain per instance (run by the customer or hosted
+for them), with enrollment optional: Knovara itself is meant to run fully locally without any account. Treat the multi-tenant
+operator model described here as the current behaviour, not the destination.
 
 ### Known limits
 

@@ -274,6 +274,38 @@ Not a monolith that bundles every always-on service into one process. A thin UI 
 
 The table below assumes a desktop install uses the embedded-Postgres, in-process-queue variants; RabbitMQ and a networked Postgres remain the right choice only once a tenant is large enough, or distributed enough, to need them — the same "do not deploy every component on day one" rule already stated above.
 
+## Consumption Model & Control Plane Role (ADR-001)
+
+**Status:** accepted, 2026-11-25. Refines "Application Type & Deployment Model" above and the adopted *Final Target Architecture v1.0*
+(customer-controlled control plane, independent local runtime, local-first/cloud-optional).
+
+**Context.** The retrieval engine, MCP server, CLI, desktop app and a SaaS control plane (accounts, tenants, enrollment, installer hosting)
+exist, but every consumption path needs the Docker development stack or a server. The control plane was built as a vendor-operated, multi-tenant
+service, ahead of the local runtime that the target architecture ranks first (Phase 1).
+
+**Decisions.**
+
+1. **Front door: AI agents.** Knovara is consumed first by coding assistants and agents through MCP, the CLI and a localhost API. The desktop app is a
+   management UI over the runtime, never the foundation (target architecture, section 14.5).
+2. **The engine runs locally by default** (no Docker, no account, works offline). Team servers (customer-run) and managed hosting (we run a customer's
+   authority domain) are opt-in upgrades, delivered by the same binary in a different composition (`Runtime:Mode = Local | Server`).
+3. **Evidence only.** Knovara supplies cited context; the consuming agent brings its own model. There is no answer generation and no paid third-party dependency.
+4. **The control plane is a per-customer authority domain**, not a vendor-wide operator console: one domain per instance (customer-run or vendor-hosted), enrollment
+   optional, credentials generalized from "devices" to runtime registrations, agents and services. A vendor-hosted instance is a *way of running* a customer's
+   domain; it does not make the vendor its authority.
+
+**Consequences.**
+
+- Phase 1 (local runtime) is the next build target. Its riskiest part has an explicit gate: an embedded SQLite store with in-process ONNX models must match
+  the Postgres path's retrieval quality on `eval/run_benchmark.py` before anything else is built on it; otherwise bundle Postgres instead.
+- The existing control plane (`Knovara.ControlPlane`) stays, and is reshaped in a later step; until then its "platform" role is the operator of one deployment.
+- With API authentication enabled the document worker, MCP server and CLI currently lack a credential; service credentials are the step after the runtime spike.
+
+**Business model (decided 2026-11-25; see `business_architecture.md`).** Open core: the local runtime, CLI and MCP server are free and open source under Apache-2.0; team and enterprise capabilities and support are paid; first customers are engineering teams. No LICENSE file is added until the open/proprietary boundary of the control plane is decided.
+
+**Not decided yet.** That boundary and the resulting repository split, whether the ONNX models are bundled or downloaded on first run, and the timing of KRES / federation (Phase 3).
+models are bundled or downloaded on first run, and the timing of KRES / federation (Phase 3).
+
 ## Incremental Indexing & Invalidation
 
 - Detect changed resources via content hashes, timestamps, or repository/webhook events.

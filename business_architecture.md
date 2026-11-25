@@ -70,5 +70,44 @@ Decided direction: a **universal, agent-independent infrastructure layer** — n
 | How long should knowledge persist? | Session-only / cross-session / both | Both, with configurable retention policy per tenant/resource |
 | Primary optimization target? | Tokens / latency / both | Both, jointly optimized |
 
+## Business Model (decided 2026-11-25)
+
+| Question | Decision |
+|---|---|
+| First paying customer | **Engineering teams and small companies** already using AI coding assistants who want a shared knowledge base with roles and audit. Individual developers adopt the free tier first (bottom-up). |
+| What is paid | **Open core.** The local runtime, CLI and MCP server are free and open source; team and enterprise capabilities and support are paid. |
+| Open-source licence | **Apache-2.0** for the open-source runtime. Revenue is protected by proprietary team/enterprise modules and managed services, not by the licence. |
+| "No paid third-party services" | Applies to the **product**: the runtime and its models must never need a paid external service. Ordinary business tooling (payment processing, hosting, domain, email) is allowed to run the company and the managed offering. |
+
+### Offering (tentative; prices are not set)
+
+| Tier | Contents | Pays |
+|---|---|---|
+| **Community** | Local runtime, CLI, MCP server, desktop UI; single user; no account | Free, open source |
+| **Team** | Shared team server, shared collections, roles, runtime/agent enrollment, audit log | Per seat or registered runtime |
+| **Enterprise** | Customer-run authority domain, SSO / SCIM, policy engine, federation, support and SLA | Annual contract |
+| **Managed compute** | Our workers for OCR and bulk embedding; hosted team servers | Usage |
+
+Why this shape: a local runtime costs us almost nothing per user, so the free tier can be generous, and local use cannot be metered without telemetry.
+What can be charged for is whatever has an organization, a server or compute cost behind it. Prices need customer discovery; none are proposed here.
+
+### Consequences for the architecture
+
+- The Community tier must work with **no account and no network** (ADR-001 in `system_architecture.md`); paid features may require an account without affecting that.
+- Open-source and proprietary code must live in separate trees. The control plane (`src/Knovara.ControlPlane`) is currently in the public repository.
+  Proposed boundary (**not yet decided**): the enrollment/token contracts and client libraries (`Knovara.Common/Device`, the token format) are open so any compatible
+  control plane interoperates and customers are never locked in; the dashboard, SSO/SCIM, policy engine, audit and managed-operations code are proprietary.
+- **No LICENSE file is added until that boundary is decided.** A repository-wide Apache-2.0 file would license the control plane too.
+- Registered runtimes (today's enrolled devices) are the natural unit for per-runtime pricing in the Team tier.
+
+### Open items
+
+1. **Prove the value claim.** The differentiator is fewer tokens per completed task than raw reading or standard RAG. Current benchmarks measure retrieval quality
+   (recall, MRR), not end-to-end tokens against a baseline. An end-to-end comparison must exist before pricing is set.
+2. Which control-plane parts are open and which are proprietary, and the resulting repository split (public runtime repository, private team/enterprise repository).
+3. Contributor terms (DCO or CLA; open core with proprietary modules usually needs a CLA) and trademark protection for the Knovara name.
+4. Telemetry policy (opt-in anonymous usage metrics) and what the Team tier reports for metering.
+5. Pricing, value metric and packaging, after talking to first teams.
+
 ---
 *Business architecture drafted from the project brainstorming session (chat history.docx) on 2026-11-23.*
