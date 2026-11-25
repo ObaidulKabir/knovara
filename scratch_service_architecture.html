@@ -1,0 +1,367 @@
+<title>Knovara Services and Consumption</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* layout concept: figure 1 is what runs today (consumers left, services middle, data/infra right);
+   figure 2 is the ADR-001 target: one engine, four ways to run it, with the control plane optional for the local runtime */
+:root{
+  --bg:#f6f5f1; --surface:#ffffff; --surface-2:#ececE6;
+  --border:#cfcbc1; --fg:#1c1a16; --muted:#6b6658;
+  --accent:#b5541f; --accent-soft:#f1e3d6;
+  --ok:#2f6b3a; --ok-soft:#e1efe3; --next:#2c5f9e; --next-soft:#e0eaf6;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15130f; --surface:#1d1a15; --surface-2:#262219;
+    --border:#443e30; --fg:#efeae0; --muted:#a39a87;
+    --accent:#e08a4f; --accent-soft:#3a2a1c;
+    --ok:#8cc796; --ok-soft:#1d3322; --next:#8db6e8; --next-soft:#1b2a3f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15130f; --surface:#1d1a15; --surface-2:#262219;
+  --border:#443e30; --fg:#efeae0; --muted:#a39a87;
+  --accent:#e08a4f; --accent-soft:#3a2a1c;
+  --ok:#8cc796; --ok-soft:#1d3322; --next:#8db6e8; --next-soft:#1b2a3f;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Inter",system-ui,sans-serif;}
+.wrap{max-width:1180px;margin:0 auto;padding:40px 0 64px;}
+h1{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;font-size:clamp(28px,4vw,38px);letter-spacing:-0.01em;margin:0 0 6px;}
+.kicker{font-family:"Space Grotesk",system-ui,sans-serif;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+.lede{max-width:700px;color:var(--muted);font-size:15.5px;line-height:1.55;margin:0 0 36px;}
+h2{font-family:"Space Grotesk",system-ui,sans-serif;font-size:19px;font-weight:600;margin:48px 0 4px;}
+.sub{color:var(--muted);font-size:14px;margin:0 0 18px;max-width:720px;line-height:1.5;}
+figure{margin:0;}
+.diagram-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:12px 4px;}
+.diagram-scroll svg{display:block;}
+figcaption{color:var(--muted);font-size:13.5px;line-height:1.5;margin-top:10px;max-width:800px;}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:14px;font-size:12.5px;color:var(--muted);}
+.legend span{display:inline-flex;align-items:center;gap:7px;}
+.swatch{width:22px;height:0;border-top:2px solid var(--fg);display:inline-block;}
+.swatch.dash{border-top:2px dashed var(--fg);}
+.swatch.accent{border-top:2.5px dashed var(--accent);}
+.chip{display:inline-block;width:14px;height:14px;border-radius:3px;border:1.5px solid;}
+.chip.ok{background:var(--ok-soft);border-color:var(--ok);}
+.chip.next{background:var(--next-soft);border-color:var(--next);}
+.chip.later{background:var(--surface-2);border-color:var(--border);border-style:dashed;}
+.note{margin-top:40px;padding:16px 18px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);font-size:13.5px;color:var(--muted);line-height:1.6;}
+.note b{color:var(--fg);font-weight:600;}
+svg text{font-family:"Inter",system-ui,sans-serif;fill:currentColor;}
+svg .title{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;}
+svg .small{font-size:11.5px;fill:var(--muted);}
+svg .flow{font-size:11.5px;}
+svg .gap{fill:var(--accent);}
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+
+<div class="wrap">
+  <p class="kicker">Knovara</p>
+  <h1>Knovara — Services &amp; Consumption</h1>
+  <p class="lede">The other diagrams show what happens <em>inside</em> the engine. This one shows what runs
+    around it and who talks to what: first as it stands today, then as decided in ADR-001 — agents as the
+    front door, the engine running locally by default, and the control plane as one customer's authority domain.</p>
+
+  <h2>Today: a server stack with a SaaS control plane beside it</h2>
+  <p class="sub">Every way in currently needs the Docker stack (about 4.8&nbsp;GB measured) or a running server.
+    The control plane issues credentials; the API only verifies them. Highlighted flows are where a credential is
+    missing once API authentication is switched on.</p>
+
+  <figure>
+    <div class="diagram-scroll">
+<svg viewBox="0 0 1500 760" width="1500" height="760" role="img"
+     aria-label="Services as built today. An AI agent reaches the Knovara API through the knovara-mcp stdio server; the CLI and the desktop app call the API directly. The desktop also enrolls with the control plane and refreshes short-lived tokens from it. The control plane issues signed tokens that the API verifies with a shared key and does not call at runtime. The API enqueues jobs on RabbitMQ for the Docling worker, which calls back into the API; the API calls the model service for embeddings and reranking and stores everything in Postgres, which the control plane also uses. An operator uses the control plane dashboard, uploads installers built by the installer pipeline, and users download them.">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="a1x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+  </defs>
+
+  <text x="30" y="34" class="title" font-size="12.5" letter-spacing="1">CONSUMERS</text>
+  <text x="560" y="34" class="title" font-size="12.5" letter-spacing="1">SERVICES</text>
+  <text x="1000" y="34" class="title" font-size="12.5" letter-spacing="1">WORKERS &amp; STORAGE</text>
+
+  <!-- consumers -->
+  <rect x="30" y="60" width="230" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="145" y="86" text-anchor="middle" class="title" font-size="14">AI agent</text>
+  <text x="145" y="105" text-anchor="middle" class="small">Claude Code, Cursor, custom</text>
+
+  <rect x="300" y="60" width="210" height="60" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="405" y="86" text-anchor="middle" class="title" font-size="14">knovara-mcp</text>
+  <text x="405" y="105" text-anchor="middle" class="small">MCP server · stdio · 11 tools</text>
+
+  <rect x="30" y="150" width="230" height="60" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="145" y="176" text-anchor="middle" class="title" font-size="14">CLI · knovara</text>
+  <text x="145" y="195" text-anchor="middle" class="small">ingest · ask · search · status</text>
+
+  <rect x="30" y="240" width="230" height="60" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="145" y="266" text-anchor="middle" class="title" font-size="14">Desktop app</text>
+  <text x="145" y="285" text-anchor="middle" class="small">WPF · ask, attach, manage</text>
+
+  <rect x="30" y="620" width="230" height="62" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="145" y="646" text-anchor="middle" class="title" font-size="14">Operator / tenant admin</text>
+  <text x="145" y="665" text-anchor="middle" class="small">browser</text>
+
+  <!-- API -->
+  <rect x="560" y="60" width="300" height="250" rx="8" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="580" y="90" class="title" font-size="15">Knovara.Api · :5299</text>
+  <text x="580" y="108" class="small">the retrieval engine, one ASP.NET process</text>
+  <line x1="560" y1="120" x2="860" y2="120" stroke="var(--border)"/>
+  <text x="580" y="144" font-size="12.5">Retrieval · ask · search · context packing</text>
+  <text x="580" y="166" font-size="12.5">Resources · ingest · upload · list · stats</text>
+  <text x="580" y="188" font-size="12.5">   inspect · re-ingest · delete · bulk delete</text>
+  <text x="580" y="210" font-size="12.5">Session memory · evaluation (in memory)</text>
+  <text x="580" y="240" font-size="12.5" class="title">Tenant auth middleware</text>
+  <text x="580" y="258" class="small">off by default; JWT tenant claim overrides</text>
+  <text x="580" y="274" class="small">the X-Tenant-Id header when switched on</text>
+
+  <!-- control plane -->
+  <rect x="560" y="470" width="300" height="230" rx="8" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="580" y="500" class="title" font-size="15">Knovara.ControlPlane · :5400</text>
+  <text x="580" y="518" class="small">SaaS control plane, ASP.NET + Razor dashboard</text>
+  <line x1="560" y1="530" x2="860" y2="530" stroke="var(--border)"/>
+  <text x="580" y="554" font-size="12.5">Accounts · roles · lockout</text>
+  <text x="580" y="576" font-size="12.5">Tenants · device limits</text>
+  <text x="580" y="598" font-size="12.5">Enrollment codes · device registry</text>
+  <text x="580" y="620" font-size="12.5">Token issuing (15-minute JWT)</text>
+  <text x="580" y="642" font-size="12.5">Installer releases · downloads</text>
+  <text x="580" y="674" class="small">operator model today: one deployment, many tenants</text>
+
+  <!-- right column -->
+  <rect x="1000" y="60" width="230" height="56" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="1115" y="84" text-anchor="middle" class="title" font-size="14">RabbitMQ</text>
+  <text x="1115" y="102" text-anchor="middle" class="small">ingestion jobs</text>
+
+  <rect x="1000" y="150" width="230" height="86" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="1115" y="176" text-anchor="middle" class="title" font-size="14">Docling worker</text>
+  <text x="1115" y="196" text-anchor="middle" class="small">Python · PDF, DOCX, HTML, MD</text>
+  <text x="1115" y="213" text-anchor="middle" class="small">layout · tables · optional OCR</text>
+
+  <rect x="1000" y="262" width="230" height="86" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="1115" y="288" text-anchor="middle" class="title" font-size="14">Model service</text>
+  <text x="1115" y="308" text-anchor="middle" class="small">Python · ONNX on CPU</text>
+  <text x="1115" y="325" text-anchor="middle" class="small">bge-small · MiniLM reranker</text>
+
+  <rect x="1000" y="400" width="470" height="150" rx="8" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="1020" y="430" class="title" font-size="15">Postgres + pgvector</text>
+  <text x="1020" y="448" class="small">one database, two owners; no foreign keys between them</text>
+  <line x1="1000" y1="460" x2="1470" y2="460" stroke="var(--border)"/>
+  <text x="1020" y="484" font-size="12.5">Engine: resources · knowledge_nodes (text, FTS, vectors)</text>
+  <text x="1020" y="504" font-size="12.5">          resource_uploads · task metrics</text>
+  <text x="1020" y="528" font-size="12.5">Control plane: cp_tenants · cp_accounts · cp_devices · cp_codes · cp_releases</text>
+
+  <rect x="1000" y="600" width="470" height="100" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="1020" y="628" class="title" font-size="14">Installer pipeline</text>
+  <text x="1020" y="650" font-size="12.5">installer/build-installer.ps1 → dotnet publish (self-contained)</text>
+  <text x="1020" y="670" font-size="12.5">→ Inno Setup → Knovara-Desktop-Setup-x.y.z.exe</text>
+  <text x="1020" y="690" class="small">per-user install · not code-signed · SHA-256 published</text>
+
+  <!-- flows: consumers -> API -->
+  <line x1="260" y1="90" x2="298" y2="90" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="279" y="80" text-anchor="middle" class="flow">stdio</text>
+  <line x1="510" y1="90" x2="558" y2="90" stroke="var(--accent)" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a1x)"/>
+  <text x="534" y="80" text-anchor="middle" class="flow gap">HTTP</text>
+
+  <line x1="260" y1="180" x2="558" y2="180" stroke="var(--accent)" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a1x)"/>
+  <text x="410" y="170" text-anchor="middle" class="flow">HTTP · tenant header (or bearer token)</text>
+
+  <path d="M260,270 L520,270 L558,270" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="410" y="260" text-anchor="middle" class="flow">HTTP · bearer token when enrolled</text>
+
+  <!-- desktop -> control plane -->
+  <path d="M145,300 L145,540 L558,540" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="160" y="410" class="flow">enroll with a code,</text>
+  <text x="160" y="426" class="flow">then refresh the token with</text>
+  <text x="160" y="442" class="flow">the device secret (DPAPI-stored)</text>
+
+  <!-- operator -> control plane -->
+  <line x1="260" y1="651" x2="558" y2="651" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="410" y="641" text-anchor="middle" class="flow">sign in · tenants · codes · revoke</text>
+
+  <!-- installer: control plane -> desktop -->
+  <path d="M558,596 L70,596 L70,302" fill="none" stroke="currentColor" stroke-width="1.75" stroke-dasharray="4 4" marker-end="url(#a1)"/>
+  <text x="84" y="586" class="flow">installer download</text>
+  <text x="84" y="570" class="flow small">(signed-in users)</text>
+
+  <!-- trust arrow -->
+  <line x1="700" y1="468" x2="700" y2="312" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="2 6" marker-end="url(#a1x)"/>
+  <text x="690" y="384" text-anchor="end" class="flow gap title">signed token (tenant claim)</text>
+  <text x="690" y="402" text-anchor="end" class="flow gap">the API only verifies it with the</text>
+  <text x="690" y="418" text-anchor="end" class="flow gap">shared signing key; it never calls</text>
+  <text x="690" y="434" text-anchor="end" class="flow gap">the control plane</text>
+
+  <!-- API -> right column -->
+  <line x1="860" y1="88" x2="998" y2="88" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="929" y="78" text-anchor="middle" class="flow">enqueue job</text>
+
+  <line x1="1115" y1="116" x2="1115" y2="148" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+
+  <line x1="998" y1="192" x2="862" y2="192" stroke="var(--accent)" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#a1x)"/>
+  <text x="929" y="176" text-anchor="middle" class="flow">callbacks: version ·</text>
+  <text x="929" y="210" text-anchor="middle" class="flow">nodes · failure · upload</text>
+
+  <path d="M860,300 L930,300 L998,300" fill="none" stroke="currentColor" stroke-width="1.75" marker-start="url(#a1)" marker-end="url(#a1)"/>
+  <text x="929" y="290" text-anchor="middle" class="flow">embed · rerank</text>
+
+  <path d="M830,310 L830,440 L998,440" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="840" y="428" class="flow">read · write</text>
+  <line x1="862" y1="520" x2="998" y2="520" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="930" y="510" text-anchor="middle" class="flow">read · write</text>
+
+  <!-- installer -> control plane -->
+  <line x1="998" y1="650" x2="862" y2="650" stroke="currentColor" stroke-width="1.75" marker-end="url(#a1)"/>
+  <text x="930" y="640" text-anchor="middle" class="flow">upload release</text>
+</svg>
+    </div>
+    <figcaption>Three credentials are missing today: the document worker's callbacks, the MCP server and the CLI send no
+      token, so switching API authentication on would break ingestion and those two front doors until service credentials exist.
+      The control plane and the API are loosely coupled on purpose — only a shared signing key and a tenant claim connect them.</figcaption>
+    <div class="legend">
+      <span><span class="swatch"></span>data flow</span>
+      <span><span class="swatch dash"></span>file transfer</span>
+      <span><span class="swatch accent"></span>credential gap, or trust without a call</span>
+    </div>
+  </figure>
+
+  <h2>Target (ADR-001): one engine, four ways to run it</h2>
+  <p class="sub">The same engine is delivered in four forms. The local runtime is the default and the front door for agents;
+    team and managed servers are what customers pay for; the hybrid form lets a local runtime attach to a server when it
+    needs to share knowledge or borrow compute. The control plane is optional for the first and central to the others.</p>
+
+  <figure>
+    <div class="diagram-scroll">
+<svg viewBox="0 0 1500 800" width="1500" height="800" role="img"
+     aria-label="Target deployment model. Agents, the CLI, the desktop or web UI and SDK clients consume Knovara. It is delivered four ways: A, a local runtime on one machine that needs no account, planned as the next build and the Community tier; B, a team server run by the customer, which exists today in server composition and is the Team and Enterprise tier; C, a managed server hosted for the customer, a future option; and D, a hybrid in which a local runtime attaches to B or C, which depends on later federation work. All forms use the same engine contracts, with local implementations for A and server implementations for B and C. The control plane is the customer's authority domain, optional for A.">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="a2x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+  </defs>
+
+  <!-- consumers -->
+  <text x="30" y="30" class="title" font-size="12.5" letter-spacing="1">CONSUMERS · agents first</text>
+  <rect x="30" y="44" width="320" height="52" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="190" y="68" text-anchor="middle" class="title" font-size="14">AI agents via MCP</text>
+  <text x="190" y="85" text-anchor="middle" class="small">the front door</text>
+  <rect x="395" y="44" width="320" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="555" y="68" text-anchor="middle" class="title" font-size="14">CLI</text>
+  <text x="555" y="85" text-anchor="middle" class="small">scripts and automation</text>
+  <rect x="760" y="44" width="320" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="920" y="68" text-anchor="middle" class="title" font-size="14">Desktop app</text>
+  <text x="920" y="85" text-anchor="middle" class="small">management UI, a client of the runtime</text>
+  <rect x="1125" y="44" width="345" height="52" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+  <text x="1297" y="68" text-anchor="middle" class="title" font-size="14">SDK / HTTP clients</text>
+  <text x="1297" y="85" text-anchor="middle" class="small">other products embedding Knovara</text>
+
+  <line x1="190" y1="140" x2="190" y2="168" stroke="currentColor" stroke-width="1.75" marker-end="url(#a2)"/>
+  <line x1="555" y1="140" x2="555" y2="168" stroke="currentColor" stroke-width="1.75" marker-end="url(#a2)"/>
+  <line x1="920" y1="140" x2="920" y2="168" stroke="currentColor" stroke-width="1.75" marker-end="url(#a2)"/>
+  <line x1="1297" y1="140" x2="1297" y2="168" stroke="currentColor" stroke-width="1.75" marker-end="url(#a2)"/>
+  <line x1="190" y1="140" x2="1297" y2="140" stroke="var(--border)" stroke-width="1.5"/>
+  <line x1="190" y1="96" x2="190" y2="140" stroke="var(--border)" stroke-width="1.5"/>
+  <line x1="555" y1="96" x2="555" y2="140" stroke="var(--border)" stroke-width="1.5"/>
+  <line x1="920" y1="96" x2="920" y2="140" stroke="var(--border)" stroke-width="1.5"/>
+  <line x1="1297" y1="96" x2="1297" y2="140" stroke="var(--border)" stroke-width="1.5"/>
+
+  <!-- A: local runtime -->
+  <rect x="30" y="170" width="340" height="300" rx="8" fill="var(--next-soft)" stroke="var(--next)" stroke-width="1.75"/>
+  <text x="46" y="198" class="title" font-size="16">A · Local runtime</text>
+  <text x="46" y="217" class="small">default · Community tier · free, open source</text>
+  <rect x="236" y="184" width="118" height="22" rx="11" fill="var(--surface)" stroke="var(--next)"/>
+  <text x="295" y="199" text-anchor="middle" font-size="11.5" fill="var(--next)" class="title">NEXT · Phase 1</text>
+  <line x1="30" y1="230" x2="370" y2="230" stroke="var(--next)" opacity=".4"/>
+  <text x="46" y="256" font-size="12.5">One process on 127.0.0.1 + a local token</text>
+  <text x="46" y="278" font-size="12.5">Retrieval and context packing (existing)</text>
+  <text x="46" y="300" font-size="12.5">SQLite · FTS5 · vector search</text>
+  <text x="46" y="322" font-size="12.5">In-process queue and .NET extractors</text>
+  <text x="46" y="344" font-size="12.5">In-process ONNX embeddings + reranker</text>
+  <text x="46" y="366" font-size="12.5">Docling worker only for PDF layout / OCR,</text>
+  <text x="46" y="384" font-size="12.5">   started lazily when needed</text>
+  <text x="46" y="414" class="title" font-size="12.5">No account, no Docker, works offline</text>
+  <text x="46" y="440" class="small">gate: must match the Postgres path on the</text>
+  <text x="46" y="456" class="small">retrieval benchmark before anything builds on it</text>
+
+  <!-- B: team server -->
+  <rect x="395" y="170" width="340" height="300" rx="8" fill="var(--ok-soft)" stroke="var(--ok)" stroke-width="1.75"/>
+  <text x="411" y="198" class="title" font-size="16">B · Team server</text>
+  <text x="411" y="217" class="small">customer-run · Team / Enterprise tier</text>
+  <rect x="601" y="184" width="118" height="22" rx="11" fill="var(--surface)" stroke="var(--ok)"/>
+  <text x="660" y="199" text-anchor="middle" font-size="11.5" fill="var(--ok)" class="title">BUILT today</text>
+  <line x1="395" y1="230" x2="735" y2="230" stroke="var(--ok)" opacity=".4"/>
+  <text x="411" y="256" font-size="12.5">The server stack that runs today</text>
+  <text x="411" y="278" font-size="12.5">Postgres + pgvector, RabbitMQ</text>
+  <text x="411" y="300" font-size="12.5">Model service + Docling workers</text>
+  <text x="411" y="322" font-size="12.5">Control plane = the customer's authority</text>
+  <text x="411" y="340" font-size="12.5">   domain: roles, enrollment, audit</text>
+  <text x="411" y="366" font-size="12.5">Desktops and agents attach with tokens</text>
+  <text x="411" y="414" class="title" font-size="12.5">Shared collections for a team</text>
+  <text x="411" y="440" class="small">needs service credentials for the worker,</text>
+  <text x="411" y="456" class="small">MCP and CLI before authentication is enforced</text>
+
+  <!-- C: managed -->
+  <rect x="760" y="170" width="340" height="300" rx="8" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.75" stroke-dasharray="6 4"/>
+  <text x="776" y="198" class="title" font-size="16">C · Managed</text>
+  <text x="776" y="217" class="small">we host a customer's authority domain</text>
+  <rect x="966" y="184" width="118" height="22" rx="11" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="1025" y="199" text-anchor="middle" font-size="11.5" fill="var(--muted)" class="title">LATER</text>
+  <line x1="760" y1="230" x2="1100" y2="230" stroke="var(--border)"/>
+  <text x="776" y="256" font-size="12.5">Same as B, operated by us</text>
+  <text x="776" y="278" font-size="12.5">Managed compute workers for OCR and</text>
+  <text x="776" y="296" font-size="12.5">   bulk embedding (the expensive jobs)</text>
+  <text x="776" y="322" font-size="12.5">Billed per seat plus usage</text>
+  <text x="776" y="366" font-size="12.5">The customer still owns data and policy;</text>
+  <text x="776" y="384" font-size="12.5">   hosting is a way of running their domain</text>
+  <text x="776" y="414" class="title" font-size="12.5">Managed compute tier</text>
+
+  <!-- D: hybrid -->
+  <rect x="1125" y="170" width="345" height="300" rx="8" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.75" stroke-dasharray="6 4"/>
+  <text x="1141" y="198" class="title" font-size="16">D · Hybrid</text>
+  <text x="1141" y="217" class="small">a local runtime that also attaches to B or C</text>
+  <rect x="1331" y="184" width="124" height="22" rx="11" fill="var(--surface)" stroke="var(--border)"/>
+  <text x="1393" y="199" text-anchor="middle" font-size="11.5" fill="var(--muted)" class="title">LATER · Phase 3</text>
+  <line x1="1125" y1="230" x2="1470" y2="230" stroke="var(--border)"/>
+  <text x="1141" y="256" font-size="12.5">Local stays authoritative for its data</text>
+  <text x="1141" y="278" font-size="12.5">Share collections by policy</text>
+  <text x="1141" y="300" font-size="12.5">Query remote knowledge when permitted</text>
+  <text x="1141" y="322" font-size="12.5">Delegate heavy jobs to managed workers</text>
+  <text x="1141" y="366" font-size="12.5">Eventual synchronization with versioning,</text>
+  <text x="1141" y="384" font-size="12.5">   lineage and conflict rules (federation)</text>
+  <text x="1141" y="414" class="title" font-size="12.5">Works offline, shares when it can</text>
+
+  <!-- contracts band -->
+  <text x="30" y="508" class="title" font-size="12.5" letter-spacing="1">THE SAME ENGINE CONTRACTS UNDER EVERY FORM</text>
+  <rect x="30" y="520" width="1440" height="44" rx="8" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <text x="750" y="548" text-anchor="middle" font-size="13">IKnowledgeStore  ·  IIndexManagementService  ·  IIngestionQueue  ·  IModelService   (Retrieval and Context Optimization depend only on these)</text>
+
+  <rect x="30" y="578" width="700" height="52" rx="8" fill="var(--next-soft)" stroke="var(--next)" stroke-dasharray="6 4"/>
+  <text x="46" y="601" class="title" font-size="13">Local implementations · to build · used by A, and by D locally</text>
+  <text x="46" y="619" class="small">SQLite store · FTS5 + brute-force vectors · in-process queue · ONNX models</text>
+  <rect x="770" y="578" width="700" height="52" rx="8" fill="var(--ok-soft)" stroke="var(--ok)"/>
+  <text x="786" y="601" class="title" font-size="13">Server implementations · exist today · used by B and C, and by D remotely</text>
+  <text x="786" y="619" class="small">Postgres + pgvector · RabbitMQ · HTTP model service</text>
+
+  <!-- control plane band -->
+  <text x="30" y="668" class="title" font-size="12.5" letter-spacing="1">CONTROL PLANE · one customer's authority domain (per instance)</text>
+  <rect x="30" y="680" width="1440" height="96" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+  <text x="50" y="708" class="title" font-size="14">Identity · runtime registrations · agent and service credentials · policy · audit · installer downloads</text>
+  <text x="50" y="732" font-size="12.5">Optional for A (a lone runtime needs no account) · central to B and C · bridges D · customer-run or vendor-hosted, never vendor-owned authority</text>
+  <text x="50" y="756" class="small">Today's build is a vendor-style multi-tenant operator console; ADR-001 reshapes it into this model.</text>
+</svg>
+    </div>
+    <figcaption><b>Evidence only:</b> the consuming agent brings its own model; Knovara returns cited context. Forms A and B differ only in which implementations sit under the shared engine contracts (selected by a Runtime:Mode setting, Local or Server, that arrives with the local runtime), so the
+      retrieval code, MCP server and CLI are the same everywhere. A is the next build because it is the only form a new user can
+      try without a server; B already exists; C and D are deliberately later.</figcaption>
+    <div class="legend">
+      <span><span class="chip next"></span>to build next</span>
+      <span><span class="chip ok"></span>exists today</span>
+      <span><span class="chip later"></span>later</span>
+    </div>
+  </figure>
+
+  <p class="note"><b>Business mapping:</b> A is the free <b>Community</b> tier; B is <b>Team</b> and, with a customer-run authority domain
+    and SSO, <b>Enterprise</b>; C and the compute offered to D are <b>Managed compute</b>. Decisions and open items are in
+    <span style="color:var(--fg)">business_architecture.md</span> and <span style="color:var(--fg)">system_architecture.md</span> (ADR-001).</p>
+</div>

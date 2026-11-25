@@ -98,12 +98,12 @@ svg .ref-text{fill:var(--muted);}
   <!-- ======================================================================= -->
   <section id="p1">
     <p class="proc-of">Decomposes process 1.0</p>
-    <h2>Ingest &amp; Represent Source</h2>
-    <p class="sub">Splits into the two services that back it: ingestion authorizes the caller, registers the resource once per (tenant, URI) and stops if the version is unchanged; representation turns new structure into the hierarchy other processes consume.</p>
+    <h2>Ingest, Represent &amp; Manage Source</h2>
+    <p class="sub">Splits into the services that back it: ingestion authorizes the caller, registers the resource once per (tenant, URI) and stops if the version is unchanged; representation turns new structure into the hierarchy other processes consume; and resource management lets the caller list, inspect, delete, re-ingest and upload the resources it owns.</p>
     <figure>
       <div class="diagram-scroll">
-<svg viewBox="0 0 1160 430" width="1160" height="430" role="img"
-     aria-label="Process 1.0 decomposed into Authorize, Register and Check Version; Format-Aware Extraction; Build Hierarchy and Summarize, which calls the summarization model; and Extract Relationships. It reads and writes the Resource and Knowledge Store and feeds processes 2.0 and 5.0.">
+<svg viewBox="0 0 1440 430" width="1440" height="430" role="img"
+     aria-label="Process 1.0 decomposed into Authorize, Register and Check Version; Format-Aware Extraction; Build Hierarchy and Summarize, which calls the summarization model; Extract Relationships; and Manage Resources, which answers list, statistics, inspect, delete, re-ingest and upload requests from the caller. It reads and writes the Resource and Knowledge Store and feeds processes 2.0 and 5.0.">
   <rect class="ref-box" x="20" y="135" width="170" height="55"/>
   <text x="105" y="166" text-anchor="middle" class="ref-text title" font-size="12.5">Source Repository</text>
   <rect class="ref-box" x="20" y="215" width="170" height="55"/>
@@ -138,11 +138,11 @@ svg .ref-text{fill:var(--muted);}
   <text x="985" y="172" text-anchor="middle" class="num" font-size="13">1.4</text>
   <text x="985" y="202" text-anchor="middle" class="title" font-size="12.5">Extract</text>
   <text x="985" y="219" text-anchor="middle" class="title" font-size="12.5">Relationships</text>
-  <line x1="240" y1="340" x2="1070" y2="340" stroke="currentColor"/>
-  <line x1="240" y1="400" x2="1070" y2="400" stroke="currentColor"/>
+  <line x1="240" y1="340" x2="1360" y2="340" stroke="currentColor"/>
+  <line x1="240" y1="400" x2="1360" y2="400" stroke="currentColor"/>
   <text x="252" y="368" class="num" font-size="13">D1</text>
   <text x="285" y="368" class="title" font-size="12.5">Resource &amp; Knowledge Store</text>
-  <text x="252" y="386" class="flow" fill="var(--muted)">resources · knowledge_nodes · edges</text>
+  <text x="252" y="386" class="flow" fill="var(--muted)">resources · knowledge_nodes · edges · resource_uploads</text>
   <line x1="190" y1="170" x2="238" y2="170" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
   <text x="20" y="128" class="flow" fill="var(--muted)">source content →</text>
   <line x1="190" y1="225" x2="238" y2="225" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
@@ -169,9 +169,27 @@ svg .ref-text{fill:var(--muted);}
   <text x="806" y="108" class="flow" fill="var(--muted)">nodes + relations</text>
   <path d="M840,150 L840,128 L1030,128 L1030,92" fill="none" stroke="var(--accent)" stroke-width="1.75" stroke-dasharray="1 5" marker-end="url(#arrowAccent)"/>
   <text x="850" y="122" class="flow" fill="var(--accent)">nodes + superseded version</text>
+  <rect class="ref-box" x="1190" y="30" width="170" height="55"/>
+  <text x="1275" y="61" text-anchor="middle" class="ref-text title" font-size="12.5">AI Agent / Caller</text>
+  <rect x="1190" y="150" width="170" height="95" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+  <line x1="1190" y1="180" x2="1360" y2="180" stroke="var(--fg)"/>
+  <text x="1275" y="172" text-anchor="middle" class="num" font-size="13">1.5</text>
+  <text x="1275" y="202" text-anchor="middle" class="title" font-size="12.5">Manage</text>
+  <text x="1275" y="219" text-anchor="middle" class="title" font-size="12.5">Resources</text>
+  <path d="M1230,85 L1230,148" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1222" y="108" text-anchor="end" class="flow" fill="var(--muted)">list · stats · inspect</text>
+  <text x="1222" y="122" text-anchor="end" class="flow" fill="var(--muted)">delete · re-ingest · upload</text>
+  <path d="M1320,148 L1320,87" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1328" y="112" class="flow" fill="var(--muted)">results</text>
+  <path d="M1230,245 L1230,338" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1224" y="286" text-anchor="end" class="flow" fill="var(--muted)">write: delete,</text>
+  <text x="1224" y="300" text-anchor="end" class="flow" fill="var(--muted)">upload bytes</text>
+  <path d="M1320,338 L1320,245" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
+  <text x="1328" y="286" class="flow" fill="var(--muted)">read: list,</text>
+  <text x="1328" y="300" class="flow" fill="var(--muted)">stats, passages</text>
 </svg>
       </div>
-      <figcaption>1.1 is where an unchanged source stops: it acknowledges the caller and nothing downstream runs. On a new version, 1.1 passes the old version along so 1.3 can tell 5.0 which cache entries to purge, and 2.0 replaces that resource's index entries when the new nodes arrive.<br><b>Built today:</b> 1.1's registration and version check (authorization is not built yet: the tenant comes from a request header); 1.2 in the Docling worker, which makes one passage per structural unit (paragraph, list, table, figure, code), joins units under 64 tokens with their neighbours in the same section and splits units over 384 tokens on sentences or table rows; and 1.3 without summaries. 1.4 is not built yet.</figcaption>
+      <figcaption>1.1 is where an unchanged source stops: it acknowledges the caller and nothing downstream runs. On a new version, 1.1 passes the old version along so 1.3 can tell 5.0 which cache entries to purge, and 2.0 replaces that resource's index entries when the new nodes arrive.<br>Re-ingesting or uploading through 1.5 hands the resource back to 1.1, which registers it again and queues the job, so a document is only ever processed along the same path.<br><b>Built today:</b> 1.1's registration and version check, and authorization: it is optional, and when switched on a signed token's tenant claim replaces any tenant named in the request (the token is issued by the control plane, which Knovara never calls); 1.5 in full: filtered, paged listing, statistics, stored passages, delete and bulk delete (never "everything"), re-ingest, upload (the original bytes are kept in D1 and fetched back by the worker) and the failure reason of a document that could not be processed; 1.2 in the Docling worker, which makes one passage per structural unit (paragraph, list, table, figure, code), joins units under 64 tokens with their neighbours in the same section and splits units over 384 tokens on sentences or table rows; and 1.3 without summaries. 1.4 is not built yet.</figcaption>
     </figure>
   </section>
 
@@ -378,7 +396,7 @@ svg .ref-text{fill:var(--muted);}
   <text x="1137" y="368" class="flow" fill="var(--muted)">read: neighbors</text>
 </svg>
       </div>
-      <figcaption>The accent path is the query-time saving: a valid key hit skips searching, not checking. 3.6 drops any evidence whose source has a newer version or whose original passage no longer matches; a cached answer that loses evidence this way is evicted and the question is retried as a cache miss. These internal steps sit behind the same edges Level 1 drew for 3.0: question in, evidence lookup with 5.0, reads of D1 and D2, query embedding and rerank, ranked evidence out.<br><b>Built today:</b> 3.2 (in memory), 3.6, and 3.4 as one adaptive pass — the top 20 semantic results, and only when their top two scores are within 0.038 of each other (about three quarters of benchmark questions), the top 10 lexical results are added and the pool is reranked by the cross-encoder. 3.1 (authorization and query analysis), coarse retrieval (3.3) and context expansion (3.5) are not built yet.</figcaption>
+      <figcaption>The accent path is the query-time saving: a valid key hit skips searching, not checking. 3.6 drops any evidence whose source has a newer version or whose original passage no longer matches; a cached answer that loses evidence this way is evicted and the question is retried as a cache miss. These internal steps sit behind the same edges Level 1 drew for 3.0: question in, evidence lookup with 5.0, reads of D1 and D2, query embedding and rerank, ranked evidence out.<br><b>Built today:</b> 3.2 (in memory), 3.6, and 3.4 as one adaptive pass — the top 20 semantic results, and only when their top two scores are within 0.038 of each other (about three quarters of benchmark questions), the top 10 lexical results are added and the pool is reranked by the cross-encoder. 3.1 is built as authorization only (the same optional token check as 1.1); query analysis, coarse retrieval (3.3) and context expansion (3.5) are not built yet. <b>Documents attached to a question</b> are handled here too: each is chunked at structural boundaries, every chunk is scored against the question by the same cross-encoder, and the chunks join the ranked evidence ahead of corpus results (the caller chose them), so a tight token budget keeps the relevant chunks and drops the rest.</figcaption>
     </figure>
   </section>
 

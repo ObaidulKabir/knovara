@@ -80,12 +80,15 @@ svg .flow{font-size:11.5px;}
     it exchanges data with. The model service is drawn outside it because it is a
     separate, swappable service, but Knovara runs it itself with open models on CPU
     (bge-small embeddings, a MiniLM cross-encoder reranker) — no paid model APIs. The
-    system sends it text and gets back vectors and relevance scores; summaries are planned.</p>
+    system sends it text and gets back vectors and relevance scores; summaries are planned. The <b style="color:var(--fg)">AI Agent / Caller</b>
+    stands for every way in: an agent through the MCP server, the CLI, the desktop app or any HTTP client. Besides questions it
+    sends documents to ingest, <em>upload</em> and <em>attached documents</em> that travel with a question, and resource-management
+    requests (list, stats, inspect, delete, re-ingest).</p>
 
   <figure>
     <div class="diagram-scroll">
 <svg viewBox="0 0 940 560" width="940" height="560" role="img"
-     aria-label="Context diagram: process 0, Knovara, receives source content from a Source Repository; receives authenticated requests and questions from an AI Agent and returns context packages, acknowledgements and session knowledge; sends text to the self-hosted Model Service and receives vectors, relevance scores and, later, summaries; and answers metrics queries from a Metrics Consumer.">
+     aria-label="Context diagram: process 0, Knovara, receives source content from a Source Repository; receives authenticated requests, questions, uploads and resource-management requests from an AI Agent and returns context packages, acknowledgements, listings, statistics and session knowledge; sends text to the self-hosted Model Service and receives vectors, relevance scores and, later, summaries; and answers metrics queries from a Metrics Consumer.">
 
   <!-- external entity: Source Repository -->
   <rect x="40" y="60" width="220" height="80" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
@@ -116,6 +119,7 @@ svg .flow{font-size:11.5px;}
   <text x="450" y="242" text-anchor="middle" class="num" font-size="15">0</text>
   <text x="450" y="282" text-anchor="middle" class="title" font-size="15">Knovara</text>
   <text x="450" y="300" text-anchor="middle" class="flow" fill="var(--muted)">context engine</text>
+  <text x="790" y="312" text-anchor="middle" class="flow" fill="var(--muted)">agents · CLI · desktop · SDK</text>
 
   <!-- flows -->
   <path d="M260,100 L300,100 L300,260 L338,260" fill="none" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
@@ -131,12 +135,14 @@ svg .flow{font-size:11.5px;}
   <text x="548" y="164" class="flow" fill="var(--muted)">relevance scores</text>
 
   <line x1="562" y1="260" x2="678" y2="260" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
-  <text x="620" y="236" text-anchor="middle" class="flow" fill="var(--muted)">context package,</text>
-  <text x="620" y="250" text-anchor="middle" class="flow" fill="var(--muted)">ack, session data</text>
+  <text x="620" y="222" text-anchor="middle" class="flow" fill="var(--muted)">context package, ack,</text>
+  <text x="620" y="236" text-anchor="middle" class="flow" fill="var(--muted)">listings, stats,</text>
+  <text x="620" y="250" text-anchor="middle" class="flow" fill="var(--muted)">session data</text>
 
   <line x1="678" y1="300" x2="562" y2="300" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
-  <text x="620" y="318" text-anchor="middle" class="flow" fill="var(--muted)">request / question</text>
-  <text x="620" y="332" text-anchor="middle" class="flow" fill="var(--muted)">+ credential</text>
+  <text x="620" y="318" text-anchor="middle" class="flow" fill="var(--muted)">question, upload,</text>
+  <text x="620" y="332" text-anchor="middle" class="flow" fill="var(--muted)">manage request</text>
+  <text x="620" y="346" text-anchor="middle" class="flow" fill="var(--muted)">+ credential</text>
 
   <line x1="430" y1="340" x2="430" y2="438" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
   <text x="422" y="394" text-anchor="end" class="flow" fill="var(--muted)">task metrics,</text>
@@ -148,12 +154,15 @@ svg .flow{font-size:11.5px;}
     </div>
     <figcaption>Process 0 is a black box here on purpose — everything it does
       internally is Level 1's job to show. Every flow on this diagram reappears at Level 1,
-      and Level 1 adds none that cross this boundary.</figcaption>
+      and Level 1 adds none that cross this boundary.<br>The <em>credential</em> is an access token issued by the control plane
+      (see <span style="color:var(--fg)">scratch_service_architecture.html</span>). Knovara only verifies its signature and reads the tenant
+      from it, so the control plane is not a party to this exchange and is deliberately not drawn here.</figcaption>
   </figure>
 
   <h2>Level 1 — System Decomposition</h2>
   <p class="sub">Six processes in three rows: ingest/index (write path), retrieve/deliver
-    (read path), and memory/metrics (support path). The <b style="color:var(--fg)">AI
+    (read path), and memory/metrics (support path). Process 1.0 also owns the resource registry, so it answers the
+    management requests (list, stats, inspect, delete, re-ingest, upload). The <b style="color:var(--fg)">AI
     Agent / Caller</b> is drawn four times and the <b style="color:var(--fg)">Model Service</b>
     twice — the same entity each time, placed next to each process it actually talks to,
     so no flow has to cross the whole page.</p>
@@ -161,7 +170,7 @@ svg .flow{font-size:11.5px;}
   <figure>
     <div class="diagram-scroll">
 <svg viewBox="0 0 1150 980" width="1150" height="980" role="img"
-     aria-label="Level 1 data flow diagram with six processes — Ingest and Represent Source, Manage Multi-Index Store, Retrieve and Rank Evidence, Optimize and Deliver Context, Manage Context Memory, and Record and Report Metrics — four data stores, and the Source Repository, AI Agent, self-hosted Model Service and Metrics Consumer external entities connected to them. Process 3.0 has the Model Service embed the question and rerank candidates, reads the index store to search, and reads the knowledge store to verify evidence.">
+     aria-label="Level 1 data flow diagram with six processes — Ingest, Represent and Manage Source, Manage Multi-Index Store, Retrieve and Rank Evidence, Optimize and Deliver Context, Manage Context Memory, and Record and Report Metrics — four data stores, and the Source Repository, AI Agent, self-hosted Model Service and Metrics Consumer external entities connected to them. Process 3.0 has the Model Service embed the question and rerank candidates, reads the index store to search, and reads the knowledge store to verify evidence.">
 
   <!-- ================= ROW 1 : write path ================= -->
   <rect x="30" y="80" width="200" height="70" fill="var(--surface-2)" stroke="var(--fg)" stroke-width="1.5"/>
@@ -176,8 +185,8 @@ svg .flow{font-size:11.5px;}
   <rect x="300" y="80" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
   <line x1="300" y1="112" x2="520" y2="112" stroke="var(--fg)"/>
   <text x="410" y="102" text-anchor="middle" class="num" font-size="14">1.0</text>
-  <text x="410" y="140" text-anchor="middle" class="title" font-size="13.5">Ingest &amp; Represent</text>
-  <text x="410" y="158" text-anchor="middle" class="title" font-size="13.5">Source</text>
+  <text x="410" y="140" text-anchor="middle" class="title" font-size="13.5">Ingest, Represent &amp;</text>
+  <text x="410" y="158" text-anchor="middle" class="title" font-size="13.5">Manage Source</text>
 
   <rect x="600" y="80" width="220" height="110" rx="10" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
   <line x1="600" y1="112" x2="820" y2="112" stroke="var(--fg)"/>
@@ -206,7 +215,7 @@ svg .flow{font-size:11.5px;}
   <line x1="300" y1="330" x2="520" y2="330" stroke="currentColor"/>
   <text x="312" y="290" class="num" font-size="13">D1</text>
   <text x="345" y="290" class="title" font-size="12.5">Resource &amp; Knowledge Store</text>
-  <text x="345" y="307" class="flow" fill="var(--muted)">resources · nodes · edges</text>
+  <text x="345" y="307" class="flow" fill="var(--muted)">resources · nodes · edges · uploads</text>
 
   <line x1="600" y1="260" x2="820" y2="260" stroke="currentColor"/>
   <line x1="600" y1="330" x2="820" y2="330" stroke="currentColor"/>
@@ -220,10 +229,10 @@ svg .flow{font-size:11.5px;}
   <text x="236" y="98" class="flow" fill="var(--muted)">content</text>
 
   <line x1="230" y1="245" x2="300" y2="138" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
-  <text x="278" y="218" class="flow" fill="var(--muted)">ingest request ↗</text>
+  <text x="278" y="218" class="flow" fill="var(--muted)">ingest/manage ↗</text>
 
   <line x1="300" y1="168" x2="230" y2="265" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
-  <text x="278" y="231" class="flow" fill="var(--muted)">resource ack ↙</text>
+  <text x="278" y="231" class="flow" fill="var(--muted)">ack/results ↙</text>
 
   <line x1="360" y1="190" x2="360" y2="258" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
   <text x="366" y="222" class="flow" fill="var(--muted)">write: resource</text>
@@ -270,7 +279,8 @@ svg .flow{font-size:11.5px;}
 
   <!-- flows row 2 -->
   <line x1="230" y1="465" x2="298" y2="465" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
-  <text x="236" y="458" class="flow" fill="var(--muted)">question</text>
+  <text x="236" y="440" class="flow" fill="var(--muted)">question +</text>
+  <text x="236" y="453" class="flow" fill="var(--muted)">documents</text>
 
   <line x1="520" y1="475" x2="598" y2="475" stroke="currentColor" stroke-width="1.75" marker-end="url(#arrow)"/>
   <text x="545" y="454" class="flow" fill="var(--muted)">ranked</text>
@@ -382,7 +392,9 @@ svg .flow{font-size:11.5px;}
       of evidence is re-checked against its current version and original passage before it
       leaves 3.0), 3.0 ↔ 5.0 (evidence cache) and 4.0 → 6.0 (task metrics). Every request
       from the AI Agent carries its credential; the tenant it resolves to scopes every
-      store read.</figcaption>
+      store read. Documents the caller attaches to a question travel with it into 3.0, which
+      scores them against the question; uploaded files and the failure reason of a document
+      that could not be processed live in D1 beside the resource.</figcaption>
     <div class="legend">
       <span><svg class="lshape" viewBox="0 0 30 18"><rect x="1" y="1" width="28" height="16" rx="6" fill="none" stroke="currentColor"/></svg>process</span>
       <span><svg class="lshape" viewBox="0 0 30 18"><rect x="1" y="1" width="28" height="16" fill="none" stroke="currentColor"/></svg>external entity</span>
@@ -395,7 +407,7 @@ svg .flow{font-size:11.5px;}
   <p class="note"><b>Reading the two levels together:</b> Level 0 is the promise made to
     the outside world — hand over a source or a question, get back a context package or
     an ack. Level 1 is how that promise is kept: two processes that only run when a
-    source is new or changed (1.0, 2.0), two that run on every question (3.0, 4.0), and
+    source is new or changed, or when its resources are managed (1.0, 2.0), two that run on every question (3.0, 4.0), and
     two supporting processes that make the first four cheaper over time (5.0, 6.0). The
     stores map directly onto <span style="color:var(--fg)">infra/postgres/init.sql</span>
     (D1/D2) and the <span style="color:var(--fg)">Knovara.ContextMemory</span> /
